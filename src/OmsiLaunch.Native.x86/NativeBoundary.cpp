@@ -135,6 +135,9 @@ struct NativeD3DTextureResult {
 namespace {
 constexpr uintptr_t OmsiBase = 0x00400000;
 constexpr uintptr_t OmsiEnd = 0x00C2B000;
+// OmsiGlobals.Map for Omsi23004_692EBFBF. Keep this synchronized with the
+// managed build profile; 0x00859D94 is not an OmsiMap slot in this build.
+constexpr uintptr_t OmsiMapGlobal = 0x00861588;
 
 bool Readable(const void* pointer, size_t bytes);
 bool PlausibleOmsiObject(void* object);
@@ -691,7 +694,7 @@ bool ApplySelectedEntrypoint(void* setpos, EntrypointDiagnostics* diagnostics, i
             diagnostics->identityDecodeStatus = ReadUnicodeString(rawName, diagnostics->rawName, _countof(diagnostics->rawName)) ? 1 : 0;
         }
     }
-    auto mapGlobal = reinterpret_cast<void**>(0x00859D94);
+    auto mapGlobal = reinterpret_cast<void**>(OmsiMapGlobal);
     auto map = (Readable(mapGlobal, sizeof(void*)) ? *mapGlobal : nullptr);
     if (PlausibleOmsiObject(map) && Readable(map, 0x144)) {
         auto mapBytes = reinterpret_cast<unsigned char*>(map);
@@ -1150,7 +1153,7 @@ extern "C" __declspec(dllexport) int __cdecl NativeResolveWorld(
     if (!ReadAnsiStringBounded(mapData, selectedMap, selectedMapCapacity, nullptr, nullptr, nullptr) ||
         expectedMap == nullptr || _wcsicmp(selectedMap, expectedMap) != 0) return 3;
 
-    if (ResolveObject(0x00859D94) != nullptr) return 4;
+    if (ResolveObject(OmsiMapGlobal) != nullptr) return 4;
 
     void* resolvedAiConfig = ResolveObject(0x0085912C);
     if (!PlausibleOmsiObject(resolvedAiConfig)) return 5;

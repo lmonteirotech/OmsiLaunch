@@ -9,10 +9,19 @@ public sealed class OmsiRuntimeReaders
     private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, uint>> layouts;
     // Handles are deliberately session-local aliases. Native addresses never
     // cross the PluginRuntime boundary and every use is revalidated against
-    // the live OMSI collection.
-    private readonly Dictionary<uint, string> roadVehicleHandles = new();
+    // the live OMSI collection. Each handle also pins an identity fingerprint
+    // (VMT + type/definition identity) captured at allocation: a freed object
+    // whose address is reused between two list reads is invisible to the
+    // collection check alone, so resolution re-reads the fingerprint and
+    // rejects the alias when the object at that address is no longer the one
+    // the handle was issued for.
+    private readonly Dictionary<uint, RoadVehicleHandleEntry> roadVehicleHandles = new();
+    private readonly Dictionary<string, RoadVehicleHandleEntry> roadVehicleHandlesByToken = new(StringComparer.Ordinal);
+    private readonly Dictionary<uint, int> roadVehicleAddressGenerations = new();
+    private HashSet<uint> activeRoadVehicleAddresses = new();
     private int nextRoadVehicleHandle;
-    private readonly Dictionary<uint, string> humanHandles = new();
+    private readonly Dictionary<uint, HumanHandleEntry> humanHandles = new();
+    private readonly Dictionary<string, HumanHandleEntry> humanHandlesByToken = new(StringComparer.Ordinal);
     private int nextHumanHandle;
 
     public OmsiRuntimeReaders(IOmsiMemory memory, IReadOnlyDictionary<string, uint> globals, IReadOnlyDictionary<string, IReadOnlyDictionary<string, uint>> layouts)
@@ -158,7 +167,7 @@ public sealed class OmsiRuntimeReaders
         for (var index = 0; index < addresses.Length; index++)
         {
             if (addresses[index] == 0) continue;
-            output[$"vehicle.{index}.handle"] = GetRoadVehicleHandle(addresses[index]);
+            output[$"vehicle.{index}.handle"] = await GetRoadVehicleHandleAsync(addresses[index], cancellationToken).ConfigureAwait(false);
         }
         return output;
     }
@@ -175,16 +184,22 @@ public sealed class OmsiRuntimeReaders
         var vmt = await memory.ReadPointer32Async(address, cancellationToken).ConfigureAwait(false);
         if (vmt < 0x00400000 || vmt >= 0x00C2B000)
             throw new InvalidOperationException("OL_E_RUNTIME_CREATED_OBJECT_INVALID");
-        return GetRoadVehicleHandle(address);
+        return await GetRoadVehicleHandleAsync(address, cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask<IReadOnlyDictionary<string, string>> ReadRoadVehicleAsync(string handle, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(handle)) throw new ArgumentException("A runtime vehicle handle is required.", nameof(handle));
         var addresses = await RoadVehicleAddressesAsync(cancellationToken).ConfigureAwait(false);
-        var address = roadVehicleHandles.FirstOrDefault(item => string.Equals(item.Value, handle, StringComparison.Ordinal)).Key;
-        if (address == 0 || Array.IndexOf(addresses, address) < 0)
-            throw new InvalidOperationException("OL_E_RUNTIME_OBJECT_HANDLE_STALE");
+        var address = await ResolveRoadVehicleHandleAsync(handle, addresses, cancellationToken).ConfigureAwait(false);
+
+        return await ReadRoadVehicleAtAsync(handle, address, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Player resolution and vehicle projection must use the same collection snapshot.
+    // A second list read can observe a changed OMSI list and bind the public handle to another object.
+    private async ValueTask<IReadOnlyDictionary<string, string>> ReadRoadVehicleAtAsync(string handle, uint address, CancellationToken cancellationToken)
+    {
 
         var layout = Layout("RoadVehicle");
         var values = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -225,7 +240,9 @@ public sealed class OmsiRuntimeReaders
         var addresses = await RoadVehicleAddressesAsync(cancellationToken).ConfigureAwait(false);
         if (playerIndex < 0 || playerIndex >= addresses.Length || addresses[playerIndex] == 0)
             return new Dictionary<string, string>(StringComparer.Ordinal) { ["present"] = "false" };
-        var snapshot = new Dictionary<string, string>(await ReadRoadVehicleAsync(GetRoadVehicleHandle(addresses[playerIndex]), cancellationToken).ConfigureAwait(false), StringComparer.Ordinal)
+        var address = addresses[playerIndex];
+        var handle = await GetRoadVehicleHandleAsync(address, cancellationToken).ConfigureAwait(false);
+        var snapshot = new Dictionary<string, string>(await ReadRoadVehicleAtAsync(handle, address, cancellationToken).ConfigureAwait(false), StringComparer.Ordinal)
         {
             ["present"] = "true",
             ["player_index"] = playerIndex.ToString(System.Globalization.CultureInfo.InvariantCulture)
@@ -482,7 +499,7 @@ public sealed class OmsiRuntimeReaders
         };
         for (var index = 0; index < addresses.Length; index++)
         {
-            if (addresses[index] != 0) output[$"human.{index}.handle"] = GetHumanHandle(addresses[index]);
+            if (addresses[index] != 0) output[$"human.{index}.handle"] = await GetHumanHandleAsync(addresses[index], cancellationToken).ConfigureAwait(false);
         }
         return output;
     }
@@ -491,8 +508,7 @@ public sealed class OmsiRuntimeReaders
     {
         if (string.IsNullOrWhiteSpace(handle)) throw new ArgumentException("A runtime human handle is required.", nameof(handle));
         var addresses = await HumanAddressesAsync(cancellationToken).ConfigureAwait(false);
-        var address = humanHandles.FirstOrDefault(item => string.Equals(item.Value, handle, StringComparison.Ordinal)).Key;
-        if (address == 0 || Array.IndexOf(addresses, address) < 0) throw new InvalidOperationException("OL_E_RUNTIME_OBJECT_HANDLE_STALE");
+        var address = await ResolveHumanHandleAsync(handle, addresses, cancellationToken).ConfigureAwait(false);
         var layout = Layout("Human");
         return new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -702,7 +718,9 @@ public sealed class OmsiRuntimeReaders
         output[prefix + "bus_stops"] = (await ReadArrayLengthAsync(await memory.ReadPointer32Async(address + layout["BusStops"], token).ConfigureAwait(false), token).ConfigureAwait(false)).ToString(System.Globalization.CultureInfo.InvariantCulture);
         output[prefix + "track_name"] = await SafeStringAsync(() => ReadAnsiAsync(address + layout["TrackName"], token)).ConfigureAwait(false);
         output[prefix + "track_index"] = await IntAsync(address, layout, "TrackIndex", token).ConfigureAwait(false);
-        output[prefix + "station_link_list"] = await IntAsync(address, layout, "StationLinkList", token).ConfigureAwait(false);
+        // Current-build representation is not reconciled. It may be an
+        // internal reference rather than a public station-link identifier.
+        // Do not serialize a pointer-shaped implementation value.
     }
 
     private async ValueTask AddLineAsync(Dictionary<string, string> output, int index, uint address, IReadOnlyDictionary<string, uint> layout, CancellationToken token)
@@ -870,15 +888,14 @@ public sealed class OmsiRuntimeReaders
         if (bytes.Length != 0) await memory.ReadExactAsync(data, bytes, token).ConfigureAwait(false);
         var result = new uint[count];
         for (var index = 0; index < count; index++) result[index] = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(index * sizeof(uint)));
+        ReconcileRoadVehicleHandles(result);
         return result;
     }
 
     private async ValueTask<uint> ResolveRoadVehicleHandleAsync(string handle, CancellationToken token)
     {
         if (string.IsNullOrWhiteSpace(handle)) throw new ArgumentException("A runtime vehicle handle is required.", nameof(handle));
-        var address = roadVehicleHandles.FirstOrDefault(item => string.Equals(item.Value, handle, StringComparison.Ordinal)).Key;
-        if (address == 0 || Array.IndexOf(await RoadVehicleAddressesAsync(token).ConfigureAwait(false), address) < 0) throw new InvalidOperationException("OL_E_RUNTIME_OBJECT_HANDLE_STALE");
-        return address;
+        return await ResolveRoadVehicleHandleAsync(handle, await RoadVehicleAddressesAsync(token).ConfigureAwait(false), token).ConfigureAwait(false);
     }
 
     private async ValueTask<(uint Constants, uint Vehicle)> ResolveScriptConstantsAsync(string handle, CancellationToken token)
@@ -894,29 +911,123 @@ public sealed class OmsiRuntimeReaders
 
     private readonly record struct CurvePoint(float X, float Y);
 
-    private string GetRoadVehicleHandle(uint address)
+    // Identity pinned to a handle at allocation. Both words are stable for the
+    // lifetime of one native instance and change when the allocator hands the
+    // same address to a different object: the Delphi VMT identifies the class
+    // and the second word is a per-object type identity (vehicle definition
+    // pointer, human model index). Two reads on resolve; no address escapes.
+    private readonly record struct ObjectFingerprint(uint Vmt, uint Identity);
+
+    private async ValueTask<ObjectFingerprint> RoadVehicleFingerprintAsync(uint address, CancellationToken token) =>
+        new(await memory.ReadPointer32Async(address, token).ConfigureAwait(false),
+            await memory.ReadPointer32Async(address + Layout("RoadVehicleDefinition")["Definition"], token).ConfigureAwait(false));
+
+    private async ValueTask<uint> ResolveRoadVehicleHandleAsync(string handle, uint[] addresses, CancellationToken token)
     {
-        if (!roadVehicleHandles.TryGetValue(address, out var handle))
+        if (!roadVehicleHandlesByToken.TryGetValue(handle, out var entry) ||
+            !roadVehicleAddressGenerations.TryGetValue(entry.Address, out var generation) ||
+            generation != entry.Generation || Array.IndexOf(addresses, entry.Address) < 0)
+            throw new InvalidOperationException("OL_E_RUNTIME_OBJECT_HANDLE_STALE");
+        // The generation only advances when a list read observed the address
+        // missing. Destruction and reallocation between two reads keeps the
+        // address in the collection, so the pinned identity is the tie-breaker.
+        if (await RoadVehicleFingerprintAsync(entry.Address, token).ConfigureAwait(false) != entry.Fingerprint)
         {
-            handle = "rv-" + (++nextRoadVehicleHandle).ToString("D6", System.Globalization.CultureInfo.InvariantCulture);
-            roadVehicleHandles.Add(address, handle);
+            DropRoadVehicleHandle(entry);
+            throw new InvalidOperationException("OL_E_RUNTIME_OBJECT_HANDLE_STALE");
         }
-        return handle;
+        return entry.Address;
+    }
+
+    private void ReconcileRoadVehicleHandles(IEnumerable<uint> addresses)
+    {
+        var current = addresses.Where(address => address != 0).ToHashSet();
+        foreach (var removed in activeRoadVehicleAddresses.Except(current).ToArray())
+        {
+            roadVehicleHandles.Remove(removed);
+            roadVehicleAddressGenerations[removed] = roadVehicleAddressGenerations.TryGetValue(removed, out var generation) ? generation + 1 : 1;
+        }
+        activeRoadVehicleAddresses = current;
+    }
+
+    private void DropRoadVehicleHandle(RoadVehicleHandleEntry entry)
+    {
+        roadVehicleHandles.Remove(entry.Address);
+        roadVehicleHandlesByToken.Remove(entry.Token);
+        roadVehicleAddressGenerations[entry.Address] = (roadVehicleAddressGenerations.TryGetValue(entry.Address, out var generation) ? generation : entry.Generation) + 1;
+    }
+
+    private readonly record struct RoadVehicleHandleEntry(uint Address, int Generation, string Token, ObjectFingerprint Fingerprint);
+
+    private async ValueTask<string> GetRoadVehicleHandleAsync(uint address, CancellationToken token)
+    {
+        if (!activeRoadVehicleAddresses.Contains(address)) throw new InvalidOperationException("OL_E_RUNTIME_OBJECT_HANDLE_STALE");
+        var fingerprint = await RoadVehicleFingerprintAsync(address, token).ConfigureAwait(false);
+        if (roadVehicleHandles.TryGetValue(address, out var entry))
+        {
+            if (entry.Fingerprint == fingerprint) return entry.Token;
+            // Same address, different object: retire the alias so the caller
+            // never sees the old token bound to the new instance.
+            DropRoadVehicleHandle(entry);
+        }
+        var generation = roadVehicleAddressGenerations.TryGetValue(address, out var value) ? value : 0;
+        roadVehicleAddressGenerations[address] = generation;
+        entry = new RoadVehicleHandleEntry(address, generation, "rv-" + (++nextRoadVehicleHandle).ToString("D6", System.Globalization.CultureInfo.InvariantCulture), fingerprint);
+        roadVehicleHandles.Add(address, entry);
+        roadVehicleHandlesByToken.Add(entry.Token, entry);
+        return entry.Token;
     }
 
     private async ValueTask<uint[]> HumanAddressesAsync(CancellationToken token)
     {
         if (!globals.TryGetValue("Humans", out var location)) throw new InvalidOperationException("Missing profiled Humans global.");
-        return await memory.ReadDelphiPointerArrayAsync(await memory.ReadPointer32Async(location, token).ConfigureAwait(false), 100_000, token).ConfigureAwait(false);
+        var result = await memory.ReadDelphiPointerArrayAsync(await memory.ReadPointer32Async(location, token).ConfigureAwait(false), 100_000, token).ConfigureAwait(false);
+        ReconcileHumanHandles(result);
+        return result;
     }
 
-    private string GetHumanHandle(uint address)
+    private async ValueTask<ObjectFingerprint> HumanFingerprintAsync(uint address, CancellationToken token) =>
+        new(await memory.ReadPointer32Async(address, token).ConfigureAwait(false),
+            await memory.ReadValueAsync<uint>(address + Layout("Human")["HumanIndex"], token).ConfigureAwait(false));
+
+    private readonly record struct HumanHandleEntry(uint Address, string Token, ObjectFingerprint Fingerprint);
+
+    private void ReconcileHumanHandles(uint[] addresses)
     {
-        if (!humanHandles.TryGetValue(address, out var handle))
+        if (humanHandles.Count == 0) return;
+        var current = addresses.Where(address => address != 0).ToHashSet();
+        foreach (var entry in humanHandles.Values.Where(candidate => !current.Contains(candidate.Address)).ToArray()) DropHumanHandle(entry);
+    }
+
+    private void DropHumanHandle(HumanHandleEntry entry)
+    {
+        humanHandles.Remove(entry.Address);
+        humanHandlesByToken.Remove(entry.Token);
+    }
+
+    private async ValueTask<string> GetHumanHandleAsync(uint address, CancellationToken token)
+    {
+        var fingerprint = await HumanFingerprintAsync(address, token).ConfigureAwait(false);
+        if (humanHandles.TryGetValue(address, out var entry))
         {
-            handle = "hb-" + (++nextHumanHandle).ToString("D6", System.Globalization.CultureInfo.InvariantCulture);
-            humanHandles.Add(address, handle);
+            if (entry.Fingerprint == fingerprint) return entry.Token;
+            DropHumanHandle(entry);
         }
-        return handle;
+        entry = new HumanHandleEntry(address, "hb-" + (++nextHumanHandle).ToString("D6", System.Globalization.CultureInfo.InvariantCulture), fingerprint);
+        humanHandles.Add(address, entry);
+        humanHandlesByToken.Add(entry.Token, entry);
+        return entry.Token;
+    }
+
+    private async ValueTask<uint> ResolveHumanHandleAsync(string handle, uint[] addresses, CancellationToken token)
+    {
+        if (!humanHandlesByToken.TryGetValue(handle, out var entry) || Array.IndexOf(addresses, entry.Address) < 0)
+            throw new InvalidOperationException("OL_E_RUNTIME_OBJECT_HANDLE_STALE");
+        if (await HumanFingerprintAsync(entry.Address, token).ConfigureAwait(false) != entry.Fingerprint)
+        {
+            DropHumanHandle(entry);
+            throw new InvalidOperationException("OL_E_RUNTIME_OBJECT_HANDLE_STALE");
+        }
+        return entry.Address;
     }
 }

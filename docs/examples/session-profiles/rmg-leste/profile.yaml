@@ -1,0 +1,46 @@
+schema: omsilaunch.session-profile/v1
+id: rmg-leste
+name: RMG Leste
+author: Equipe RMG
+version: "1.0"
+compatibility:
+  maps:
+    - maps\\RMG Leste\\global.cfg
+new:
+  map: maps\\RMG Leste\\global.cfg
+  entrypoint-index: 3
+  date:
+    mode: explicit
+    value: "2026-09-20"
+  time:
+    mode: explicit
+    value: "06:30:00"
+  weather:
+    mode: icao
+    icao: SBGR
+presets:
+  - index: 1
+    id: weak
+    name: PC fraco
+    settings:
+      graphics.maxFPS: 30
+      graphics.tileDistance: 3
+    presentation:
+      splash:
+        mode: managed
+        language: PTB
+        assets: assets\\splash
+    internet-textures:
+      mode: disabled
+  - index: 2
+    id: medium
+    name: PC médio
+    settings:
+      graphics.maxFPS: 40
+      graphics.tileDistance: 5
+  - index: 3
+    id: strong
+    name: PC forte
+    settings:
+      graphics.maxFPS: 60
+      graphics.tileDistance: 8

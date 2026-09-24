@@ -13,10 +13,15 @@ public static class CurrentDnneAdapter
     private static readonly TimerProc TimerCallback = OnTimer;
     private static nuint timer;
     private static bool runtimePolling;
+    private static int pluginStartInvoked;
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) }, EntryPoint = "PluginStart")]
     public static void PluginStart(nint owner)
     {
+        // OMSI can invoke PluginStart more than once during startup. The first
+        // invocation owns the one-shot headless hook; re-entering after that
+        // hook changes the profiled VMT would otherwise look like a bad build.
+        if (Interlocked.Exchange(ref pluginStartInvoked, 1) != 0) return;
         if (string.Equals(Environment.GetEnvironmentVariable("OMSILAUNCH_INTERNET_TEXTURES_MODE"), "Disabled", StringComparison.OrdinalIgnoreCase) && NativeSuppressInternetTextures() == 0)
             CurrentTelemetrySink.Emit("internet-textures.suppression.failed", new Dictionary<string, string>());
         else if (string.Equals(Environment.GetEnvironmentVariable("OMSILAUNCH_INTERNET_TEXTURES_MODE"), "Disabled", StringComparison.OrdinalIgnoreCase))
@@ -30,6 +35,7 @@ public static class CurrentDnneAdapter
         runtimePolling = false;
         Runtime.Shutdown();
         NativeRestoreInternetTextures();
+        Volatile.Write(ref pluginStartInvoked, 0);
     }
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) }, EntryPoint = "AccessVariable")]
     public static void AccessVariable(ushort variableIndex, nint value, nint writeValue) { }

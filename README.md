@@ -1,81 +1,266 @@
 <p align="center">
-  <img src="assets/branding/omsilaunch-logo.png" alt="OmsiLaunch" width="620">
+  <img src="assets/branding/omsilaunch-logo-en-preto.png" alt="OmsiLaunch" width="620">
 </p>
 
 <p align="center"><strong>Session control for OMSI 2.</strong></p>
 <p align="center">Open source · Programmable · Community driven</p>
 
+<p align="center">
+  <strong>English (US)</strong> ·
+  <a href="README.en-GB.md">English (UK)</a> ·
+  <a href="README.pt-BR.md">Português (Brasil)</a> ·
+  <a href="README.pt-PT.md">Português (Portugal)</a> ·
+  <a href="README.fr-FR.md">Français</a> ·
+  <a href="README.de-DE.md">Deutsch</a> ·
+  <a href="README.es-ES.md">Español (España)</a> ·
+  <a href="README.es-LATAM.md">Español (Latinoamérica)</a> ·
+  <a href="README.it-IT.md">Italiano</a> ·
+  <a href="README.pl-PL.md">Polski</a> ·
+  <a href="README.nl-NL.md">Nederlands</a> ·
+  <a href="README.ru-RU.md">Русский</a> ·
+  <a href="README.zh-CN.md">简体中文</a> ·
+  <a href="README.zh-TW.md">繁體中文</a> ·
+  <a href="README.ja-JP.md">日本語</a>
+</p>
+
 ---
 
 # OmsiLaunch
 
-**OmsiLaunch** is an open-source programmable launch, session-management,
-and runtime-control layer for OMSI 2. It provides a public API, a functional
-CLI, an in-process OMSI plugin/runtime, and an exact-build `BuildProfile`
-boundary. It is infrastructure for launchers, tools, automation, and community
-integrations rather than a graphical launcher.
+**OmsiLaunch** is an open-source layer for launching OMSI 2 programmatically,
+managing sessions and controlling the running simulation. It plans a session
+from a declarative description, applies every temporary configuration change
+inside a journaled transaction, starts OMSI, observes it until gameplay, lets
+tools read and change the running simulation through a public API, and restores
+every file it touched when the session ends.
+
+It is infrastructure for launchers, tools, automation and community
+integrations. It is not a graphical launcher.
 
 > **Define the session, not the clicks.**
 
-## Beta 0.1
+## Status: 0.1.0-beta3
 
-The second public beta is **0.1.0-beta2**. It supports the exact OMSI profile
-`Omsi23004_692EBFBF`, validates the executable fingerprint before launch, and
-does not claim compatibility with unknown OMSI builds. The package and detailed
-compatibility status are documented in [`docs/`](docs/README.md).
+The current public beta is **`0.1.0-beta3`**. Beta 3 is the post-hardening
+baseline. Most of its features are `RUNTIME_VALIDATED`: they were observed in
+live OMSI sessions, including the runtime closure round of 2026-09-23. Some
+remain `STATICALLY_VALIDATED` (offline tests only), `PARTIAL` or `UNAVAILABLE`.
+Two runtime items are still open because they cannot be produced safely: Steam
+LAA gameplay and the natural removal of road vehicles and humans (RV-002). The
+[runtime validation status](docs/status/runtime-validation-status.md) page is
+the authoritative record of what ran under OMSI and what ran only offline.
 
-OmsiLaunch supports semantic session planning with `LaunchSpec` and
-`PlanSession`, startup through `StartSession`, observed runtime control, and
-normal `StopSession`/`CloseSession` cleanup. Supported runtime capabilities are
-explicitly cataloged; experimental and unavailable capabilities are not hidden.
+It is a beta: the public API, CLI and file formats are marked `STABLE_BETA`,
+`EXPERIMENTAL`, `PARTIAL`, `INTERNAL` or `UNAVAILABLE` per member and may still
+change before 1.0.
 
-## Safe Session Ownership
+## Supported OMSI scope
 
-All launch configuration overrides are session-scoped. OmsiLaunch snapshots,
-journals, applies, verifies, and restores every temporary configuration or GUI
-file it changes. It does not offer permanent configuration editing in this beta.
+OmsiLaunch supports exactly one OMSI 2 build and refuses to start anything it
+does not recognise.
 
-Product plugin files are permanently installed under `plugins\\OmsiLaunch.*`.
-They are not copied in and removed for every session, and third-party plugins
-are never transactionally owned. `.omsilaunch\\` is an OmsiLaunch-private
-directory for assets, diagnostics, journals, and user examples.
+| Item | Scope |
+| --- | --- |
+| OMSI build | Profile `Omsi23004_692EBFBF`: `Omsi.exe` with SHA-256 `692EBFBF2CD32FAB05A8B934E52C2BE14594E939882F3DBF2BA4E2B66CCC6243` (OMSI 2.3.004). `STABLE_BETA`; every runtime validation ran on this file. |
+| Steam LAA executable | SHA-256 `7DAB063D1F62E73B3A2C7A6AC1921D7EDF5E5DB0FBC731481D117EEC8DE7D759` is accepted by allow-list. Only the fingerprint and planning were validated; gameplay was **not** runtime validated. `PARTIAL`. |
+| Unknown builds | Rejected with `OL_E_UNSUPPORTED_BUILD`. The hash is re-checked at every plan and at every start. |
+| Operating system | Windows 10 or later, x64. |
+| Runtimes | .NET 6 Desktop Runtime **x64** (controller) and .NET 6 Runtime **x86** (the plugin runs inside the 32-bit `Omsi.exe`). |
 
-Managed splash presentation is the default. PTB, ENG, DEU, and FRA product
-assets are temporarily overlaid and restored exactly. Native/`Unset` splash
-mode preserves OMSI files.
+Details: [Compatibility](docs/reference/compatibility.md) and
+[Installation](docs/getting-started/installation.md).
+
+## What it provides
+
+**Sessions.** A session is planned from a `LaunchSpec` (CLI flags, a JSON file,
+a Session Profile or the API), validated without side effects (`/plan`), then
+started, observed through `SessionState` transitions and ended. Stopping a
+session terminates OMSI by force, so OMSI cannot write over the files that are
+about to be restored. See [Session lifecycle](docs/concepts/session-lifecycle.md).
+
+**Transactions and recovery.** Every configuration override is scoped to the
+session. OmsiLaunch snapshots, journals, applies, verifies and restores each
+file it changes, including after a crash (`/recovery-status`, `/recover`,
+`RecoverPendingAsync`). It offers no permanent configuration editing. See
+[Transactions and recovery](docs/concepts/transactions-and-recovery.md).
+
+**CLI (`OmsiLaunch.exe`).** A reference frontend over the same public API, with
+no OMSI logic of its own: discovery, planning, starting sessions, and client
+commands against a running session. See the [CLI reference](docs/reference/cli.md)
+and [CLI examples](docs/reference/cli-examples.md).
+
+**`OmsiLaunchW.exe`.** The Windows-subsystem host for shortcuts. It takes the
+same command line with no console window and reports failures in message boxes.
+See [OmsiLaunchW.exe](docs/reference/omsilaunchw.md).
+
+**Windows tray.** Every owner session shows a notification-area icon with a
+status window and an "End session" action. The action takes the same stop path
+as `session stop`. See [Windows tray](docs/reference/windows-tray.md).
+
+**Session Profiles.** Declarative `profile.yaml` packages
+(`omsilaunch.session-profile/v1`) under
+`.omsilaunch\session-profiles\<id>\`, so that content authors can ship
+reproducible sessions that start with one command. See
+[Session Profiles](docs/reference/session-profiles.md).
+
+**Public API and runtime control.** `OmsiLaunch.Api` (`IOmsiLaunch`) is the
+preferred product surface. Runtime operations such as time, weather, map,
+camera, timetable, vehicles, humans, script variables and D3D textures are
+session-scoped, validated against the build profile, and addressed through opaque
+semantic handles, never native pointers. Results are bounded by a 64 KiB
+runtime slot. See the [Public API reference](docs/reference/public-api.md) and
+[Runtime control](docs/reference/runtime-control.md).
+
+**Local control.** A per-installation named pipe bound to the active
+`session_id` lets other same-user processes read status and events, stop the
+session and run public runtime operations. See
+[Local control / IPC](docs/reference/local-control.md).
+
+**Capabilities.** Every capability and public runtime operation is cataloged
+with its stability. Experimental and unavailable capabilities are listed, not
+hidden (`OmsiLaunch.exe capabilities`). See
+[Capabilities](docs/reference/capabilities.md).
+
+**Permanent plugin.** The in-process plugin closure is installed once under
+`plugins\OmsiLaunch.*`. Before every start it is checked against the SHA-256
+entries of `release-manifest.json`. Third-party plugins are never touched. See
+[Permanent plugin model](docs/concepts/permanent-plugin.md).
+
+## Quick start
+
+Extract the release package into the OMSI 2 installation root, then run the
+following commands from that directory:
+
+```text
+OmsiLaunch.exe /version
+OmsiLaunch.exe /list:Maps
+OmsiLaunch.exe /new /map:maps\Grundorf\global.cfg /entrypoint-index:1 /plan
+OmsiLaunch.exe /new /map:maps\Grundorf\global.cfg /entrypoint-index:1
+```
+
+While that session runs, a second console in the same directory can query or
+end it:
+
+```text
+OmsiLaunch.exe session status --json
+OmsiLaunch.exe time get
+OmsiLaunch.exe session stop
+```
+
+Walkthrough: [First session](docs/getting-started/first-session.md). For .NET
+integrators: [Public API quick start](docs/getting-started/api-quick-start.md).
+
+## Documentation
+
+The full documentation set is indexed in [`docs/README.md`](docs/README.md).
+The English (US) pages under `docs/` are canonical and normative.
+
+| Topic | Page |
+| --- | --- |
+| Public API | [docs/reference/public-api.md](docs/reference/public-api.md) |
+| CLI | [docs/reference/cli.md](docs/reference/cli.md) |
+| CLI examples | [docs/reference/cli-examples.md](docs/reference/cli-examples.md) |
+| OmsiLaunchW.exe | [docs/reference/omsilaunchw.md](docs/reference/omsilaunchw.md) |
+| Windows tray | [docs/reference/windows-tray.md](docs/reference/windows-tray.md) |
+| Session Profiles | [docs/reference/session-profiles.md](docs/reference/session-profiles.md) |
+| Runtime control | [docs/reference/runtime-control.md](docs/reference/runtime-control.md) |
+| Local control / IPC | [docs/reference/local-control.md](docs/reference/local-control.md) |
+| Capabilities | [docs/reference/capabilities.md](docs/reference/capabilities.md) |
+| Errors and exit codes | [docs/reference/errors.md](docs/reference/errors.md), [docs/reference/exit-codes.md](docs/reference/exit-codes.md) |
+| Packaging | [docs/reference/packaging.md](docs/reference/packaging.md) |
+| Known limitations | [docs/reference/known-limitations.md](docs/reference/known-limitations.md) |
+| Runtime validation status | [docs/status/runtime-validation-status.md](docs/status/runtime-validation-status.md) |
+
+### Documentation in other languages
+
+The documentation is translated into 14 locales under
+[`docs/localized/`](docs/localized/LOCALIZATION-MANIFEST.md). The translations
+were produced from the canonical English (US) pages and validated mechanically
+against them. Native-speaker editorial review was not part of the Beta 3 release
+and may follow after publication. When a translation and the English page
+disagree, the English page is authoritative.
+
+## Limitations and open items
+
+These are the most important limitations. The complete list is in
+[Known limitations](docs/reference/known-limitations.md).
+
+- **One OMSI build.** Steam LAA is `PARTIAL`: gameplay, reads, commands and stop
+  need a genuine Steam installation and were not runtime validated.
+- **Not available in this beta:** starting from the last map state (`/last`),
+  explicit date, time, year or weather at start, and player-vehicle assignment
+  at start. Requesting any of these makes the plan not runnable instead of being
+  silently ignored.
+- **Runtime writes are limited.** `weather.set`, calendar writes, string-variable
+  writes and vehicle relocation are unavailable. Runtime changes are not
+  journaled and are not restored.
+- **Handle lifetime.** Stale detection for road vehicles and humans that
+  disappear naturally (RV-002) has no safe runtime producer and is validated
+  offline only.
+- **Bounded results.** Long lists are truncated (`truncated=true`). There is no
+  paging.
+- **Stop is forced.** OMSI's own shutdown does not run, and unsaved OMSI state is
+  lost.
+- **Same-user trust model.** Any process of the same Windows user can reach the
+  local control plane.
 
 ## Download
 
-[⬇️ Download OmsiLaunch 0.1.0-beta2](https://github.com/lmonteirotech/OmsiLaunch/releases/download/v0.1.0-beta.2/OmsiLaunch-0.1.0-beta2.zip)
+Download **`OmsiLaunch-0.1.0-beta3.zip`** and its `.sha256` file from the
+[Releases page](https://github.com/lmonteirotech/OmsiLaunch/releases). Extract
+it directly into the supported OMSI root. The package contains the controller
+(`OmsiLaunch.exe`, `OmsiLaunchW.exe`), its dependencies, the permanent plugin
+closure with `release-manifest.json`, splash assets, a session example and the
+offline documentation under `.omsilaunch\docs\`. Package layout and clean
+removal: [Packaging](docs/reference/packaging.md).
 
-[SHA-256 checksum](https://github.com/lmonteirotech/OmsiLaunch/releases/download/v0.1.0-beta.2/OmsiLaunch-0.1.0-beta2.zip.sha256) · [View release notes](https://github.com/lmonteirotech/OmsiLaunch/releases/tag/v0.1.0-beta.2)
+## Building from source
 
-Extract the package directly into the supported OMSI root. It includes the
-controller, its required dependencies, the permanent plugin closure, splash
-assets, a Release session example, and a small offline user guide.
+Requirements:
 
-See [Installation](docs/getting-started/installation.md) and
-[First Session](docs/getting-started/first-session.md). Use
-`OmsiLaunch.exe /version` to inspect the installed controller.
+- Windows 10 or later, x64.
+- .NET 6 SDK, with the x64 and x86 .NET 6 runtimes for running the tests.
+- Visual Studio with the MSBuild C++ workload (platform toolset `v145`) and a
+  Windows 10 SDK, for the three native projects: `OmsiLaunch.Native.x86`
+  (Win32), and `OmsiLaunch.Bootstrapper` and `OmsiLaunch.WindowsHost` (x64).
 
-## For Developers
+`OmsiLaunch.sln` holds the managed projects and test suites. The single
+offline entry point builds everything and runs every offline suite; it never
+launches OMSI:
 
-The preferred product surface is the semantic public API. The CLI is a
-reference frontend over that same API; it contains no separate OMSI logic.
-Runtime control is session-scoped, profile-validated, and uses opaque semantic
-handles rather than public native pointers.
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\Invoke-OfflineValidation.ps1
+```
 
-- [Public API](docs/reference/PUBLIC-API.md)
-- [Runtime control](docs/reference/RUNTIME-CONTROL.md)
-- [Capability catalog](docs/reference/beta-0.1-capabilities.md)
-- [Known limitations](docs/reference/known-limitations.md)
-- [Build profile policy](docs/reference/BUILD-PROFILES.md)
+`-SkipNative` skips the native projects and the packaging regression.
+`-SkipDocs` skips the documentation gates. Build output goes to `artifacts\`,
+which is not tracked. `tools\New-ReleasePackage.ps1` stages, hashes, validates
+and compresses a release package from an existing build. See
+[Packaging](docs/reference/packaging.md) and
+[Testing and validation](TESTING-AND-VALIDATION.md).
 
-## Community and License
+| Path | Content |
+| --- | --- |
+| `src/` | Product libraries: API, core, configuration, content, interop, process, plugin, build profile, native x86 boundary |
+| `tools/` | CLI and Windows host (`OmsiLaunch.Cli`), native shims (`OmsiLaunch.Bootstrapper`), offline test host, packaging and validation scripts, localization tooling |
+| `tests/` | Unit, integration, profile, Windows UI and documentation test suites |
+| `docs/` | Canonical documentation and its translations under `docs/localized/` |
+| `examples/` | LaunchSpec and session examples |
+| `assets/` | Branding, icons and package assets |
+| `third_party/` | Upstream provenance notes |
 
-OmsiLaunch is a community-oriented open-source project. It is independent from
-other OMSI launchers and can be consumed by compatible community tooling.
+Maintainer summaries: [PUBLIC-API.md](PUBLIC-API.md),
+[RUNTIME-CONTROL.md](RUNTIME-CONTROL.md),
+[RUNTIME-CAPABILITIES.md](RUNTIME-CAPABILITIES.md),
+[BUILD-PROFILES.md](BUILD-PROFILES.md),
+[IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md),
+[POST-RELEASE-BACKLOG.md](POST-RELEASE-BACKLOG.md).
+
+## Community and license
+
+OmsiLaunch is a community-oriented open-source project. It is independent of
+other OMSI launchers, and compatible community tooling can build on it.
 
 OmsiLaunch is licensed under [LGPL-3.0-only](LICENSE). See the
-[third-party notices](THIRD-PARTY-NOTICES.md) for incorporated-source
-provenance and applicable notices.
+[third-party notices](THIRD-PARTY-NOTICES.md) for the provenance of
+incorporated source and the applicable notices.

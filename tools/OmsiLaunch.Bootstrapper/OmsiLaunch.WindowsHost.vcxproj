@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <ItemGroup Label="ProjectConfigurations"><ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration></ItemGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'" Label="Configuration"><ConfigurationType>Application</ConfigurationType><PlatformToolset>v145</PlatformToolset><CharacterSet>Unicode</CharacterSet></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup><OutDir>$(MSBuildThisFileDirectory)..\..\artifacts\bin\OmsiLaunch.WindowsHost\$(Configuration)\</OutDir><IntDir>$(MSBuildThisFileDirectory)..\..\artifacts\obj\OmsiLaunch.WindowsHost\$(Configuration)\</IntDir><TargetName>OmsiLaunchW</TargetName><WindowsSdkDir Condition="'$(WindowsSdkDir)' == ''">C:\Program Files (x86)\Windows Kits\10\</WindowsSdkDir><WindowsTargetPlatformVersion Condition="'$(WindowsTargetPlatformVersion)' == ''">10.0.28000.0</WindowsTargetPlatformVersion><OmsiHostPack>C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Host.win-x64\6.0.36\runtimes\win-x64\native</OmsiHostPack></PropertyGroup>
+  <ItemDefinitionGroup><ClCompile><AdditionalIncludeDirectories>$(OmsiHostPack);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><LanguageStandard>stdcpp17</LanguageStandard></ClCompile><Link><AdditionalLibraryDirectories>$(OmsiHostPack);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories><AdditionalDependencies>nethost.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies><SubSystem>Windows</SubSystem></Link><ResourceCompile><AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ResourceCompile></ItemDefinitionGroup>
+  <ItemGroup><ClCompile Include="OmsiLaunch.WindowsHost.cpp" /><ResourceCompile Include="OmsiLaunch.WindowsHost.rc" /></ItemGroup>
+  <Target Name="GenerateOmsiLaunchWindowsHostIdentity" BeforeTargets="ResourceCompile"><MakeDir Directories="$(IntDir)" /><Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\Write-NativeIdentityHeader.ps1&quot; -IdentityFile &quot;$(MSBuildThisFileDirectory)..\..\OmsiLaunch.Version.props&quot; -OutputPath &quot;$(IntDir)OmsiLaunch.Identity.h&quot;" /></Target>
+  <Target Name="CopyWindowsHostNetHost" AfterTargets="Build"><Copy SourceFiles="$(OmsiHostPack)\nethost.dll" DestinationFolder="$(OutDir)" /></Target>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

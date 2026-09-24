@@ -40,6 +40,16 @@ public static class RuntimeCommandWire
         result = new RuntimeCommandResult(session, requestId, value.Succeeded, value.ErrorCode, value.Values); return true;
     }
 
+    // Reads only the request identity of a staged envelope. Both ends of the
+    // mailbox use it to make sure a response answers the request that is
+    // currently staged and not one that was already abandoned.
+    public static bool TryReadRequestId(ReadOnlySpan<byte> bytes, out ulong requestId)
+    {
+        requestId = 0;
+        if (bytes.Length < HeaderSize || BinaryPrimitives.ReadUInt32LittleEndian(bytes) != Magic) return false;
+        requestId = BinaryPrimitives.ReadUInt64LittleEndian(bytes[28..36]); return true;
+    }
+
     private static byte[] Serialize(ushort kind, Guid sessionId, ulong requestId, byte[] payload)
     {
         var output = new byte[HeaderSize + payload.Length]; var header = output.AsSpan();

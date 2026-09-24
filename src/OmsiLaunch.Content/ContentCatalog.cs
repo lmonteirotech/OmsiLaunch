@@ -36,6 +36,41 @@ public sealed class FileSystemContentCatalog : IOmsiContentCatalog
 {
     private readonly string installationRoot;
 
+    // Recursive discovery must not follow directory junctions or symbolic links:
+    // a junction cycle inside maps\, Vehicles\ or situations\ would otherwise make
+    // discovery (and therefore PlanSession) spin until the path length limit trips.
+    // AttributesToSkip is set to ONLY ReparsePoint on purpose. The EnumerationOptions
+    // default also skips Hidden|System, which SearchOption.AllDirectories never did,
+    // and hidden or system-flagged content files must keep being discovered.
+    // MatchType.Win32 preserves the pattern semantics SearchOption.AllDirectories used.
+    private static readonly EnumerationOptions RecursiveNoReparse = new()
+    {
+        RecurseSubdirectories = true,
+        AttributesToSkip = FileAttributes.ReparsePoint,
+        IgnoreInaccessible = true,
+        MatchCasing = MatchCasing.CaseInsensitive,
+        MatchType = MatchType.Win32,
+    };
+
+    // OMSI content files (.bus, .cti, .hof, .osn, global.cfg) are Windows-1252 ANSI,
+    // not UTF-8, so Encoding.Default (UTF-8 on .NET 6) mangles accented friendly
+    // names into U+FFFD. Fall back to Latin1 if the code page provider is unavailable;
+    // both map byte 0xE7 to 'ç' and the rest of the common range identically.
+    private static readonly Encoding Ansi = CreateAnsiEncoding();
+
+    private static Encoding CreateAnsiEncoding()
+    {
+        try
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            return Encoding.GetEncoding(1252);
+        }
+        catch
+        {
+            return Encoding.Latin1;
+        }
+    }
+
     public FileSystemContentCatalog(string installationRoot) => this.installationRoot = Path.GetFullPath(installationRoot);
 
     public IReadOnlyList<MapContent> EnumerateMaps() => EnumerateFiles("maps", "global.cfg")
@@ -54,7 +89,7 @@ public sealed class FileSystemContentCatalog : IOmsiContentCatalog
     {
         var vehicle = ResolveVehicle(vehicleIdentity);
         var directory = Path.GetDirectoryName(vehicle.AbsolutePath)!;
-        return Directory.EnumerateFiles(directory, "*.cti", SearchOption.AllDirectories)
+        return Directory.EnumerateFiles(directory, "*.cti", RecursiveNoReparse)
             .SelectMany(file => ReadCtiItems(file).Select(item => new RepaintContent(vehicle.Identity, Canonical(file) + "#item:" + item.Ordinal, Relative(file), file, item.Name, CanRead(file))))
             .OrderBy(x => x.Identity, StringComparer.OrdinalIgnoreCase).ToArray();
     }
@@ -127,13 +162,13 @@ public sealed class FileSystemContentCatalog : IOmsiContentCatalog
     private IEnumerable<string> EnumerateFiles(string root, string name)
     {
         var directory = Path.Combine(installationRoot, root);
-        return Directory.Exists(directory) ? Directory.EnumerateFiles(directory, name, SearchOption.AllDirectories) : Array.Empty<string>();
+        return Directory.Exists(directory) ? Directory.EnumerateFiles(directory, name, RecursiveNoReparse) : Array.Empty<string>();
     }
 
     private IEnumerable<string> EnumerateByExtension(string root, string extension)
     {
         var directory = Path.Combine(installationRoot, root);
-        return Directory.Exists(directory) ? Directory.EnumerateFiles(directory, "*" + extension, SearchOption.AllDirectories) : Array.Empty<string>();
+        return Directory.Exists(directory) ? Directory.EnumerateFiles(directory, "*" + extension, RecursiveNoReparse) : Array.Empty<string>();
     }
 
     private string Relative(string path) => Path.GetRelativePath(installationRoot, path).Replace('/', '\\');
@@ -183,7 +218,9 @@ public sealed class FileSystemContentCatalog : IOmsiContentCatalog
 
     private static IEnumerable<string> ReadLines(string path, int maximum = 512)
     {
-        try { return File.ReadLines(path, Encoding.Default).Take(maximum).ToArray(); }
+        // File.ReadLines still honours a UTF-8/UTF-16 BOM when one is present; the
+        // supplied encoding only decides how BOM-less (i.e. ordinary OMSI) files decode.
+        try { return File.ReadLines(path, Ansi).Take(maximum).ToArray(); }
         catch { return Array.Empty<string>(); }
     }
 }

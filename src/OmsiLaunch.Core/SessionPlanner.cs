@@ -15,6 +15,14 @@ public sealed class SessionPlanner
     {
         cancellationToken.ThrowIfCancellationRequested();
         var diagnostics = new List<LaunchDiagnostic>(LaunchValidation.Validate(spec)); var mutations = new List<PlannedMutation>();
+        if (spec.SessionProfile is { } sessionProfile)
+            diagnostics.Add(new("session_profile.selected", sessionProfile.Id, new Dictionary<string, string>
+            {
+                ["session_profile.id"] = sessionProfile.Id, ["session_profile.name"] = sessionProfile.Name,
+                ["session_profile.version"] = sessionProfile.Version, ["session_profile.author"] = sessionProfile.Author,
+                ["session_profile.preset_id"] = sessionProfile.PresetId, ["session_profile.preset_index"] = sessionProfile.PresetIndex.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["session_profile.preset_name"] = sessionProfile.PresetName, ["session_profile.path"] = sessionProfile.PackagePath
+            }));
         var resolved = new List<ContentIdentity>(); var required = new List<Capability>(); var unsupported = new List<Capability>();
         var detected = platform.Detect(spec.Installation.RootPath);
         Require("runtime.current-windows-x64", detected.CurrentPlatformSupported, "Current Windows x64 platform validation", required, diagnostics, "OL_E_UNSUPPORTED_OPERATING_SYSTEM");
@@ -90,7 +98,11 @@ public sealed class SessionPlanner
         }
         catch (Exception exception) { diagnostics.Add(new("OL_E_SESSION_PRESENTATION_INVALID", exception.Message)); }
         var touched = mutations.Select(x => x.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        return Task.FromResult(new SessionPlan(Guid.NewGuid(), Omsi23004.ProfileIdentity, spec, detected, resolved, touched, artifacts, required, unsupported, mutations, diagnostics, diagnostics.Count == 0));
+        // Informational provenance (for example session_profile.selected) must
+        // not turn an otherwise valid plan into a non-runnable plan. Public
+        // planning errors are explicitly identified by the stable OL_E_ code.
+        var runnable = diagnostics.All(diagnostic => !diagnostic.Code.StartsWith("OL_E_", StringComparison.Ordinal));
+        return Task.FromResult(new SessionPlan(Guid.NewGuid(), Omsi23004.ProfileIdentity, spec, detected, resolved, touched, artifacts, required, unsupported, mutations, diagnostics, runnable));
     }
 
     private static void Require(string name, bool available, string reason, List<Capability> required, List<LaunchDiagnostic> diagnostics, string code)

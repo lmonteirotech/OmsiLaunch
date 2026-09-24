@@ -16,6 +16,8 @@ Action? callback = null; var native = new FakeNative(); var events = new List<(s
 var runtimeControl = new FakeRuntimeControl();
 var runtime = new PluginRuntime(native, (eventName, data) => events.Add((eventName, data)), runtimeControl);
 if (!runtime.Start(action => callback = action) || callback is null) throw new InvalidOperationException("PluginRuntime did not accept the portable handoff.");
+if (!runtime.Start(_ => throw new InvalidOperationException("Duplicate PluginRuntime.Start must not schedule another startup.")) || native.BuildValidationCount != 1)
+    throw new InvalidOperationException("PluginRuntime did not make duplicate startup notification idempotent.");
 callback();
 if (!native.Armed || native.Map != "maps\\Grundorf\\global.cfg" || native.Index != -1 || native.EntrypointIdentity != "Nordspitze Bauernhof" || !events.Any(x => x.Name == "gameplay.entered" && x.Data.TryGetValue("raw_label", out var label) && label == "Nordspitze Bauernhof")) throw new InvalidOperationException("PluginRuntime did not dispatch the semantic NEW_MAP request.");
 Console.WriteLine("PASS plugin-runtime.handoff-new-map");
@@ -42,6 +44,43 @@ Thread.Sleep(2_050);
 runtime.PollRuntimeCommands();
 using (var view = runtimeMapping.CreateViewAccessor(0, 65_536, MemoryMappedFileAccess.Read)) { if (view.ReadInt32(0) != 2) throw new InvalidOperationException("PluginRuntime did not complete runtime request."); var length = view.ReadInt32(4); var response = new byte[length]; view.ReadArray(8, response, 0, length); if (!RuntimeCommandWire.TryDeserializeResponse(response, out var result) || result is null || !result.Succeeded || result.RequestId != 7) throw new InvalidOperationException("Runtime command response did not preserve session binding."); }
 if (!events.Any(entry => entry.Name == "d3d.ready")) throw new InvalidOperationException("PluginRuntime did not publish the runtime-control lifecycle event.");
+RuntimeCommandResult DispatchFixture(ulong id, string operation, out int state, Guid? sessionOverride = null) => DispatchFixtureSized(id, operation, out state, out _, sessionOverride);
+RuntimeCommandResult DispatchFixtureSized(ulong id, string operation, out int state, out int responseBytes, Guid? sessionOverride = null)
+{
+    responseBytes = 0;
+    var request = RuntimeCommandWire.SerializeRequest(new RuntimeCommand(sessionOverride ?? handoff.SessionId, id, operation));
+    using (var view = runtimeMapping.CreateViewAccessor(0, 65_536, MemoryMappedFileAccess.ReadWrite)) { view.Write(4, request.Length); view.WriteArray(8, request, 0, request.Length); view.Write(0, 1); view.Flush(); }
+    runtime.PollRuntimeCommands();
+    using var read = runtimeMapping.CreateViewAccessor(0, 65_536, MemoryMappedFileAccess.ReadWrite);
+    state = read.ReadInt32(0);
+    if (state != 2) return new RuntimeCommandResult(handoff.SessionId, 0, false);
+    var length = read.ReadInt32(4); responseBytes = length; var bytes = new byte[length]; read.ReadArray(8, bytes, 0, length); read.Write(0, 0); read.Flush();
+    return RuntimeCommandWire.TryDeserializeResponse(bytes, out var decoded) && decoded is not null ? decoded : throw new InvalidOperationException("fixture response could not be decoded");
+}
+var oversized = DispatchFixtureSized(21, "fixture.oversize", out var oversizedState, out var oversizedBytes);
+if (oversizedState != 2 || oversized.Succeeded || oversized.ErrorCode != "OL_E_RUNTIME_RESPONSE_TOO_LARGE" || oversized.RequestId != 21) throw new InvalidOperationException("Oversized plugin response was not reported as a typed error.");
+// The error envelope for "too large" must itself be small and bounded.
+if (oversizedBytes <= 0 || oversizedBytes > 512) throw new InvalidOperationException("The too-large error envelope is not bounded: " + oversizedBytes + " bytes.");
+var bounded = DispatchFixtureSized(28, "fixture.bounded-list-oversize", out var boundedState, out var boundedBytes);
+var boundedRows = bounded.Values?.Keys.Where(key => key.StartsWith("track_entry.", StringComparison.Ordinal)).Select(key => int.Parse(key.Split('.')[1], System.Globalization.CultureInfo.InvariantCulture)).Distinct().OrderBy(row => row).ToArray() ?? Array.Empty<int>();
+if (boundedState != 2 || !bounded.Succeeded || bounded.Values!["truncated"] != "true" || bounded.Values["count"] != "3000"
+    || int.Parse(bounded.Values["returned_count"], System.Globalization.CultureInfo.InvariantCulture) != boundedRows.Length || boundedRows.Length == 0
+    || !boundedRows.SequenceEqual(Enumerable.Range(0, boundedRows.Length)) || boundedBytes > 65_536 - 8)
+    throw new InvalidOperationException("An oversized bounded list was not truncated to fit the slot (state " + boundedState + ", code " + bounded.ErrorCode + ", rows " + boundedRows.Length + ").");
+Console.WriteLine("PASS plugin-runtime.bounded-list-fits-slot");
+var afterOversize = DispatchFixture(24, "time.read", out var afterOversizeState);
+if (afterOversizeState != 2 || !afterOversize.Succeeded || afterOversize.RequestId != 24) throw new InvalidOperationException("Mailbox was not usable after an oversized response.");
+var thrown = DispatchFixture(25, "fixture.throw", out var thrownState);
+if (thrownState != 2 || thrown.Succeeded || thrown.ErrorCode != "OL_E_RUNTIME_OPERATION_FAILED" || thrown.RequestId != 25) throw new InvalidOperationException("An operation exception was not reported as a typed error.");
+var foreign = DispatchFixture(26, "time.read", out var foreignState, Guid.NewGuid());
+if (foreignState != 2 || foreign.Succeeded || foreign.ErrorCode != "OL_E_RUNTIME_SESSION_MISMATCH" || foreign.RequestId != 26) throw new InvalidOperationException("A request for another session was not reported as a typed error.");
+var afterForeign = DispatchFixture(27, "time.read", out var afterForeignState);
+if (afterForeignState != 2 || !afterForeign.Succeeded || afterForeign.RequestId != 27) throw new InvalidOperationException("Mailbox was not usable after a rejected request.");
+DispatchFixture(22, "fixture.abandon", out var abandonedState);
+if (abandonedState != 0) throw new InvalidOperationException("Plugin published a response for a request the host had abandoned.");
+var afterAbandon = DispatchFixture(23, "time.read", out var afterState);
+if (afterState != 2 || !afterAbandon.Succeeded || afterAbandon.RequestId != 23) throw new InvalidOperationException("Mailbox was not usable after an abandoned request.");
+Console.WriteLine("PASS plugin-runtime.oversized-and-abandoned-responses");
 runtime.Shutdown();
 if (!runtimeControl.ShutdownObserved) throw new InvalidOperationException("PluginRuntime did not transfer shutdown ownership to runtime control.");
 Console.WriteLine("PASS plugin-runtime.command-channel");
@@ -70,7 +109,8 @@ Console.WriteLine("PASS interop.delphi-memory-primitives");
 sealed class FakeNative : IPluginNativeServices
 {
     public bool Armed { get; private set; } public string? Map { get; private set; } public int Index { get; private set; } public string? EntrypointIdentity { get; private set; }
-    public bool ValidateBuild(string profileIdentity) => profileIdentity == "Omsi23004_692EBFBF";
+    public int BuildValidationCount { get; private set; }
+    public bool ValidateBuild(string profileIdentity) { BuildValidationCount++; return profileIdentity == "Omsi23004_692EBFBF"; }
     public bool ArmHeadlessStart() { Armed = true; return true; }
     public int StartNewMap(string mapIdentity, int presentedEntrypointIndex, string entrypointIdentity) { Map = mapIdentity; Index = presentedEntrypointIndex; EntrypointIdentity = entrypointIdentity; return 0; }
     public string? Situation { get; private set; }
@@ -83,7 +123,26 @@ sealed class FakeRuntimeControl : IPluginRuntimeControl
 {
     private bool emitted;
     public bool ShutdownObserved { get; private set; }
-    public RuntimeCommandResult Execute(RuntimeCommand command) => new(command.SessionId, command.RequestId, true, Values: new Dictionary<string, string> { ["source"] = "fake" });
+    public RuntimeCommandResult Execute(RuntimeCommand command)
+    {
+        // Correction-pass fixtures: an oversized result, and a request that the
+        // host abandons (timeout reset) while the plugin is still executing it.
+        if (command.Operation == "fixture.throw") throw new InvalidOperationException("simulated native fault inside an operation");
+        if (command.Operation == "fixture.oversize") return new(command.SessionId, command.RequestId, true, Values: new Dictionary<string, string> { ["payload"] = new string('x', 70_000) });
+        // Documentation audit BUG-05: a bounded list whose row bound still exceeds the slot.
+        if (command.Operation == "fixture.bounded-list-oversize")
+        {
+            var rows = new Dictionary<string, string> { ["count"] = "3000", ["returned_count"] = "2000", ["truncated"] = "true" };
+            for (var row = 0; row < 2000; row++) { rows["track_entry." + row + ".track"] = row.ToString(System.Globalization.CultureInfo.InvariantCulture); rows["track_entry." + row + ".name"] = new string('n', 60); }
+            return new(command.SessionId, command.RequestId, true, Values: rows);
+        }
+        if (command.Operation == "fixture.abandon")
+        {
+            using var mapping = MemoryMappedFile.OpenExisting(Environment.GetEnvironmentVariable("OMSILAUNCH_RUNTIME_CHANNEL")!, MemoryMappedFileRights.ReadWrite);
+            using var view = mapping.CreateViewAccessor(0, 65_536, MemoryMappedFileAccess.ReadWrite); view.Write(0, 0); view.Flush();
+        }
+        return new(command.SessionId, command.RequestId, true, Values: new Dictionary<string, string> { ["source"] = "fake" });
+    }
     public IReadOnlyList<PluginRuntimeEvent> PollLifecycle()
     {
         if (emitted) return Array.Empty<PluginRuntimeEvent>();

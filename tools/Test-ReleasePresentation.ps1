@@ -30,9 +30,14 @@ foreach ($language in $languages) {
     if (-not (Test-Path -LiteralPath $asset)) { throw "Release splash asset missing: $asset" }
 }
 
+[xml] $identity = Get-Content -LiteralPath (Join-Path $repository 'OmsiLaunch.Version.props') -Raw -Encoding utf8
+$identityProperties = $identity.Project.PropertyGroup | Select-Object -First 1
+$productVersion = $identityProperties.OmsiLaunchProductVersion
+if ([string]::IsNullOrWhiteSpace($productVersion)) { throw 'OmsiLaunch.Version.props does not define OmsiLaunchProductVersion.' }
+
 $manifest = Get-Content -LiteralPath (Join-Path $package 'release-manifest.json') -Raw | ConvertFrom-Json
 if ($manifest.configuration -ne 'Release') { throw 'Package manifest is not Release.' }
-if ($manifest.product_version -ne '0.1.0-beta1' -or $manifest.package_alias -ne 'current') { throw 'Package manifest does not distinguish product version 0.1.0-beta1 from the current package alias.' }
+if ($manifest.product_version -ne $productVersion -or $manifest.package_alias -ne 'current') { throw "Package manifest does not distinguish product version $productVersion from the current package alias." }
 if (($manifest.files.path | Where-Object { $_ -match '(^|/)Debug(/|$)' }).Count -ne 0) { throw 'Release manifest contains a Debug path.' }
 if (($manifest.files.path | Where-Object { $_ -match '^runtime/plugin/' }).Count -ne 0) { throw 'Release manifest contains obsolete runtime/plugin staging files.' }
 if (($manifest.files.path | Where-Object { $_ -match '^plugins/OmsiLaunch\.' }).Count -eq 0) { throw 'Release manifest does not install the permanent plugin closure under plugins.' }
@@ -62,7 +67,8 @@ function Install-ReleasePackage {
     # Only product-owned filenames are copied. Existing third-party plugins
     # are neither captured nor touched by this installation operation.
     foreach ($file in Get-ChildItem -LiteralPath $PackageRoot -File) {
-        if ($file.Name -eq 'release-manifest.json') { continue }
+        # release-manifest.json is part of the closure: skipping it left an
+        # older manifest beside newer binaries (Round A RA-007).
         Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $Installation $file.Name) -Force
     }
     $destinationPlugins = Join-Path $Installation 'plugins'
@@ -118,6 +124,31 @@ $customExpected = @{
     'NewSplashscreen_PTB.bmp' = (Get-FileHash -LiteralPath (Join-Path $custom 'PTB.bmp') -Algorithm SHA256).Hash
 }
 
+function ConvertTo-CommandLineArgument {
+    # Quotes one argument the way CommandLineToArgvW expects it. Windows
+    # PowerShell joins an -ArgumentList array with spaces and adds no quoting,
+    # so every value is escaped here: embedded quotes and the backslashes that
+    # precede them (or the closing quote) are escaped, which keeps a root such
+    # as 'D:\' or 'C:\Program Files\OMSI 2\' intact.
+    param([string] $Value)
+    if ($Value.Length -ne 0 -and $Value -notmatch '[\s"]') { return $Value }
+    $builder = New-Object System.Text.StringBuilder
+    [void] $builder.Append('"')
+    $backslashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') { $backslashes++; continue }
+        if ($character -eq '"') {
+            [void] $builder.Append('\' * ($backslashes * 2 + 1)).Append('"')
+            $backslashes = 0
+            continue
+        }
+        if ($backslashes -ne 0) { [void] $builder.Append('\' * $backslashes); $backslashes = 0 }
+        [void] $builder.Append($character)
+    }
+    [void] $builder.Append('\' * ($backslashes * 2)).Append('"')
+    return $builder.ToString()
+}
+
 function Invoke-PresentationCase {
     param([string] $Name, [string[]] $Arguments, $ExpectedOverlay, [bool] $PreserveDuringSession)
     $before = Get-SplashSnapshot $gui
@@ -129,7 +160,8 @@ function Invoke-PresentationCase {
     $output = Join-Path $diagnostics ('release-presentation-' + $Name + '-cli.out')
     $stderrPath = $output + '.err'
     Remove-Item -LiteralPath $output, $stderrPath -Force -ErrorAction SilentlyContinue
-    $argumentLine = ('"{0}" {1} /observe-seconds:{2} /json' -f $root, ($Arguments -join ' '), $ObserveSeconds)
+    $processArguments = @($root) + $Arguments + @(('/observe-seconds:' + $ObserveSeconds), '/json')
+    $argumentLine = ($processArguments | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join ' '
     $process = Start-Process -FilePath $cli -ArgumentList $argumentLine -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $output -RedirectStandardError $stderrPath -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds(210)
     $observed = $false

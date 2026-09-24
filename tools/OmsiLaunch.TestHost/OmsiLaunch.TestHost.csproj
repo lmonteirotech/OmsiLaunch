@@ -5,5 +5,6 @@
     <ProjectReference Include="..\..\src\OmsiLaunch.Content\OmsiLaunch.Content.csproj" />
     <ProjectReference Include="..\..\src\OmsiLaunch.Configuration\OmsiLaunch.Configuration.csproj" />
     <ProjectReference Include="..\..\src\OmsiLaunch.Process\OmsiLaunch.Process.csproj" />
+    <ProjectReference Include="..\..\src\OmsiLaunch.Core\OmsiLaunch.Core.csproj" />
   </ItemGroup>
 </Project>

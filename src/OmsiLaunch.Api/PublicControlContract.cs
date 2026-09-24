@@ -5,6 +5,8 @@ namespace OmsiLaunch.Api;
 public enum PublicExitCode
 {
     Success = 0,
+    // A plan was not runnable, or an owned session ended in Failed.
+    SessionFailed = 1,
     InvalidArguments = 2,
     UnsupportedProfile = 3,
     NoActiveSession = 4,

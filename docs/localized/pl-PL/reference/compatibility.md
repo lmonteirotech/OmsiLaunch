@@ -1,0 +1,71 @@
+# Zgodność
+
+<!-- l10n: source=reference/compatibility.md -->
+> Tłumaczenie [oryginalnej strony w języku angielskim](../../../reference/compatibility.md) dla OmsiLaunch 0.1.0-beta3. Wiążąca jest strona angielska: w razie rozbieżności obowiązują strona angielska i kod.
+
+OmsiLaunch steruje OMSI, modyfikując sprofilowane adresy wewnątrz jednego, ściśle określonego buildu pliku wykonywalnego. Ta strona określa, które buildy OMSI są obsługiwane, co dzieje się z każdym innym buildem, oraz jakie są wymagania dotyczące systemu operacyjnego i runtime dla hosta i wtyczki. Źródła: `src/OmsiLaunch.Builds.Omsi23004/Profile.cs`, `src/OmsiLaunch.Core/SessionPlanner.cs`, `src/OmsiLaunch.Process/RuntimePlatform.cs`, `src/OmsiLaunch.Plugin/CurrentDnneAdapter.cs` oraz pliki projektów.
+
+<a id="supported-omsi-builds"></a>
+## Obsługiwane buildy OMSI
+
+Istnieje dokładnie jeden profil buildu, `Omsi23004_692EBFBF` (rodzina `OMSI_2_3_004_COMMON`). Akceptuje on dwa pliki wykonywalne na podstawie dokładnego skrótu SHA-256:
+
+| Wariant | SHA-256 `Omsi.exe` | Rozmiar | Wersja pliku / produktu PE | Status |
+| --- | --- | --- | --- | --- |
+| Sprofilowany plik wykonywalny (`ALTERNATE_LAA`) | `692EBFBF2CD32FAB05A8B934E52C2BE14594E939882F3DBF2BA4E2B66CCC6243` | 8,503,440 bajtów | 2.2.032 / 2.3.004 | `STABLE_BETA`; każda weryfikacja w runtime z macierzy została przeprowadzona na tym pliku |
+| Steam LAA (`STEAM_LAA`) | `7DAB063D1F62E73B3A2C7A6AC1921D7EDF5E5DB0FBC731481D117EEC8DE7D759` | nie jest sprawdzany | | Akceptowany przez listę dozwolonych, ponieważ ma ten sam sprofilowany układ natywny i różni się wyłącznie nagłówkami pliku wykonywalnego; **niezweryfikowany w runtime** (`profiles` zgłasza `runtime_validated=false`, `validation_status=pending_beta_field_validation`). `PARTIAL`. |
+
+`OmsiLaunch.exe profiles` wypisuje tę tabelę w formacie JSON. Numery wersji nie są brane pod uwagę przy akceptacji: liczy się wyłącznie SHA-256 (a dla głównego pliku wykonywalnego także dokładny rozmiar). Żaden inny build OMSI 2, żaden zmodyfikowany plik wykonywalny ani żadna kopia z łatką 4 GB o innym skrócie nie jest obsługiwana.
+
+<a id="what-happens-with-an-unknown-build"></a>
+## Co dzieje się z nieznanym buildem
+
+| Etap | Sprawdzenie | Wynik |
+| --- | --- | --- |
+| Planowanie (`PlanSessionAsync`, `/plan`, `/validate`) | `Omsi23004.Profile.MatchesExecutable(<root>\Omsi.exe)` | Wymagana możliwość (capability) `omsi.profile.OMSI23004` ma stan `UNAVAILABLE`; komunikat diagnostyczny `OL_E_UNSUPPORTED_BUILD`; `SessionPlan.IsRunnable=false`. Kod wyjścia CLI 1 dla uruchomienia lub 3 (`UnsupportedProfile`), gdy błąd wydostaje się jako wyjątek. |
+| Start (`StartSessionAsync`) | Specyfikacja jest ponownie planowana, a skrót `Omsi.exe` obliczany ponownie | Plan, który nie jest już możliwy do uruchomienia (na przykład plik wykonywalny zmienił się po zaplanowaniu lub kod wywołujący zmodyfikował `IsRunnable`), jest odrzucany z `OL_E_PLAN_NOT_RUNNABLE`; żadna transakcja nie jest otwierana, żaden proces nie jest uruchamiany. |
+| W procesie (`PluginRuntime.Start`) | `NativeServices.ValidateBuild` wymaga, aby `BuildProfileId` z przekazania (handoff) był równy `Omsi23004_692EBFBF` **oraz** aby `NativeValidateBuild()` zakończyło się powodzeniem dla działającego obrazu | Telemetria `plugin.build.invalid`; host kończy sesję błędem `OL_E_BUILD_VALIDATION_FAILED`; żaden natywny hook nie jest uzbrajany; OMSI jest kończony, a transakcja przywracana. |
+
+Ponieważ skrót pliku wykonywalnego jest porównywany z rozmiarami i bajtami sprofilowanych zmiennych globalnych, sprawdzenie w procesie jest ostatnią linią obrony przed kopią, która przeszła sprawdzenie skrótu, ale której obraz różni się w chwili ładowania. Nie istnieje profil zapasowy ani dopasowywanie heurystyczne.
+
+<a id="operating-system-and-architecture"></a>
+## System operacyjny i architektura
+
+`CurrentWindowsX64Platform.Detect` wyznacza `RuntimePlatformInfo`. Bieżąca platforma jest obsługiwana tylko wtedy, gdy spełnione są wszystkie poniższe warunki:
+
+| Wymaganie | Sprawdzenie | Błąd przy niespełnieniu |
+| --- | --- | --- |
+| Windows | `OperatingSystem.IsWindows()` | `OL_E_UNSUPPORTED_OPERATING_SYSTEM` |
+| Windows 10 lub nowszy | `Environment.OSVersion.Version.Major >= 10` (Windows 10, Windows 11, Server 2016+) | `OL_E_PLATFORM_CAPABILITY_MISSING` |
+| 64-bitowy Windows i 64-bitowy proces hosta | `OSArchitecture == X64` i `ProcessArchitecture == X64` | `OL_E_UNSUPPORTED_OS_ARCHITECTURE` |
+| Instalacja z prawem zapisu | Katalog główny istnieje, nie jest tylko do odczytu i zawiera `plugins\` | `OL_E_INSTALLATION_NOT_WRITABLE` |
+
+`RuntimePlatformInfo` zgłasza również `OmsiArchitecture` i `PluginArchitecture` jako `X86` (OMSI jest procesem 32-bitowym; zestaw plików wtyczki (closure) jest x86 i działa pod WOW64), `LegacyPlatform=false` oraz `Wow64Available`. Windows ARM64 nie jest obsługiwany, nawet tam, gdzie istnieje emulacja x64, ponieważ sam proces hosta musi być procesem x64.
+
+<a id="net-requirements"></a>
+## Wymagania .NET
+
+| Komponent | Runtime | Uwagi |
+| --- | --- | --- |
+| Kontroler (`OmsiLaunch.exe`, `OmsiLaunchW.exe` -> `OmsiLaunch.Controller.dll`) | .NET 6, x64 | Natywny bootstrapper lokalizuje runtime przez `hostfxr` za pomocą dołączonego do pakietu `nethost.dll`. Brak runtime zgłasza shim (kody wyjścia 100-106; zobacz [CLI](cli.md) i [kody wyjścia](exit-codes.md)). |
+| Zestaw plików wtyczki (`plugins\OmsiLaunch.Plugin.dll` przez `OmsiLaunch.PluginNE.dll`) | .NET 6, **x86** (`net6.0-windows`, `win-x86`), hostowany przez DNNE 2.0.6 wewnątrz `Omsi.exe` | Wymaga zainstalowania na komputerze runtime .NET 6 Desktop/Core x86; sam runtime 64-bitowy nie wystarcza dla wtyczki. |
+| Mostek natywny (`plugins\OmsiLaunch.Native.x86.dll`) | natywny x86 | Ładowany wyłącznie z `plugins\` (zobacz [stała wtyczka](../concepts/permanent-plugin.md)). |
+
+<a id="legacy-platforms"></a>
+## Starsze platformy
+
+Windows 7, Windows 8.x, Windows XP oraz inne systemy NT 6 i starsze znajdują się poza obecnym zakresem obsługi. `RuntimePlatformInfo.LegacyPlatform` ma zawsze wartość `false` i nie istnieje żaden adapter dla starszych systemów; pole i punkt rozszerzenia `IPluginNativeServices` istnieją wyłącznie po to, aby w przyszłości można było dodać adapter dla starszych systemów bez zmiany publicznego API (zobacz `docs/adr/ADR-0010-Legacy-Portability-Boundary.md`). Nic w tym wydaniu nie działa na tych systemach.
+
+<a id="steam-and-large-address-aware-notes"></a>
+## Uwagi dotyczące Steam i Large Address Aware
+
+- Dystrybucja Steam OMSI 2.3.004 z nagłówkiem LAA (`7DAB063D...`) znajduje się na liście dozwolonych, ponieważ jej sprofilowane adresy są identyczne z adresami głównego pliku wykonywalnego. Dopóki w macierzy nie zostanie zarejestrowana sesja weryfikacji terenowej, każdą możliwość dla tego pliku należy traktować jako `PARTIAL`.
+- Steam sam uruchamia OMSI; sesję należy uruchomić przez `OmsiLaunch.exe`, aby istniało przekazanie (handoff). Po uruchomieniu ze Steam stała wtyczka pozostaje nieaktywna (brak przekazania, brak hooków).
+- Zastosowanie innego narzędzia do łatania LAA na `Omsi.exe` zmienia jego skrót i czyni go nieznanym buildem.
+
+<a id="related-pages"></a>
+## Powiązane strony
+
+- [Znane ograniczenia](known-limitations.md)
+- [Stan weryfikacji w runtime](../status/runtime-validation-status.md)
+- [Instalacja](../getting-started/installation.md)

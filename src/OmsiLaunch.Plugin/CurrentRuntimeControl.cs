@@ -24,7 +24,11 @@ internal sealed class CurrentRuntimeControl : IPluginRuntimeControl
     private readonly OmsiRuntimeReaders readers;
     private readonly OmsiWeatherWriter weather;
     private readonly OmsiCameraWriter camera;
+    private readonly OmsiCameraLockWriter cameraLock;
     private readonly string sessionTag;
+    private CameraLockPolicy? activeCameraLock;
+    private long nextCameraLockPoll;
+    private string? lastCameraLockError;
     private long nextD3DPoll;
     private bool d3DActivated;
     private PluginRuntimeEvent? pendingD3DEvent;
@@ -39,6 +43,7 @@ internal sealed class CurrentRuntimeControl : IPluginRuntimeControl
         readers = new OmsiRuntimeReaders(memory, Omsi23004.Profile.Globals, Omsi23004.Profile.ObjectLayouts);
         weather = new OmsiWeatherWriter(memory, Omsi23004.Profile.Globals, Omsi23004.Profile.ObjectLayouts);
         camera = new OmsiCameraWriter(memory, Omsi23004.Profile.Globals, Omsi23004.Profile.ObjectLayouts);
+        cameraLock = new OmsiCameraLockWriter(memory, Omsi23004.Profile.Globals, Omsi23004.Profile.ObjectLayouts);
     }
 
     public RuntimeCommandResult Execute(RuntimeCommand command)
@@ -55,6 +60,8 @@ internal sealed class CurrentRuntimeControl : IPluginRuntimeControl
                 "weather.actual.read" => readers.ReadActualWeatherAsync().AsTask().GetAwaiter().GetResult(),
                 "camera.read" => readers.ReadCameraAsync().AsTask().GetAwaiter().GetResult(),
                 "camera.set" => SetCamera(command.Arguments),
+                "camera.lock" => LockCamera(command.Arguments),
+                "camera.unlock" => UnlockCamera(),
                 "d3d.status" => ReadD3DStatus(),
                 "d3d.texture.create" => CreateD3DTexture(command.Arguments),
                 "d3d.texture.describe" => DescribeD3DTexture(command.Arguments),
@@ -62,10 +69,11 @@ internal sealed class CurrentRuntimeControl : IPluginRuntimeControl
                 "d3d.texture.release" => ReleaseD3DTexture(command.Arguments),
                 "road-vehicles.read" => readers.ReadRoadVehiclesAsync().AsTask().GetAwaiter().GetResult(),
                 "road-vehicles.list" => readers.ListRoadVehiclesAsync().AsTask().GetAwaiter().GetResult(),
-                // Internal-only profiled primitive. It is runtime-validated,
-                // but deliberately excluded from the Beta public surface
-                // because it does not establish PlayerVehicle assignment.
-                "internal.road-vehicles.make-basic" => MakeBasicRoadVehicle(command.Arguments),
+                // The internal route retains its native diagnostic address for
+                // research. The public spawn route projects only an opaque,
+                // session-scoped RoadVehicle handle.
+                "internal.road-vehicles.make-basic" => MakeBasicRoadVehicle(command.Arguments, includeNativeAddress: true),
+                "road-vehicles.spawn" => SpawnRoadVehicle(command.Arguments),
                 "road-vehicles.place-random" => PlaceRandomBus(command.Arguments),
                 "road-vehicle.read" => ReadRoadVehicle(command.Arguments),
                 "vehicle.variable.get" => ReadRoadVehicleVariable(command.Arguments),
@@ -100,6 +108,11 @@ internal sealed class CurrentRuntimeControl : IPluginRuntimeControl
             };
             return new RuntimeCommandResult(command.SessionId, command.RequestId, true, Values: values);
         }
+        catch (RuntimeOperationException exception)
+        {
+            return new RuntimeCommandResult(command.SessionId, command.RequestId, false, exception.Code,
+                new Dictionary<string, string> { ["detail"] = exception.Message });
+        }
         catch (D3DOperationException exception)
         {
             return new RuntimeCommandResult(command.SessionId, command.RequestId, false, exception.Code,
@@ -113,14 +126,36 @@ internal sealed class CurrentRuntimeControl : IPluginRuntimeControl
 
     public IReadOnlyList<PluginRuntimeEvent> PollLifecycle()
     {
-        if (!d3DActivated) return Array.Empty<PluginRuntimeEvent>();
+        var events = new List<PluginRuntimeEvent>();
+        var now = Environment.TickCount64;
+        if (activeCameraLock is { } policy && now >= Interlocked.Read(ref nextCameraLockPoll))
+        {
+            Interlocked.Exchange(ref nextCameraLockPoll, now + 100);
+            try
+            {
+                cameraLock.ApplyAsync(policy.Family, policy.Preset).AsTask().GetAwaiter().GetResult();
+                lastCameraLockError = null;
+            }
+            catch (Exception exception)
+            {
+                if (!string.Equals(lastCameraLockError, exception.Message, StringComparison.Ordinal))
+                {
+                    lastCameraLockError = exception.Message;
+                    events.Add(new PluginRuntimeEvent("camera.lock.degraded", new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["code"] = exception.Message
+                    }));
+                }
+            }
+        }
+        if (!d3DActivated) return events;
         if (pendingD3DEvent is { } pending)
         {
             pendingD3DEvent = null;
-            return new[] { pending };
+            events.Add(pending);
+            return events;
         }
-        var now = Environment.TickCount64;
-        if (now < Interlocked.Read(ref nextD3DPoll)) return Array.Empty<PluginRuntimeEvent>();
+        if (now < Interlocked.Read(ref nextD3DPoll)) return events;
         // Host telemetry is a latest-value mailbox sampled every 100 ms. Keep
         // lifecycle transitions visible across at least two host samples.
         Interlocked.Exchange(ref nextD3DPoll, now + 250);
@@ -134,16 +169,15 @@ internal sealed class CurrentRuntimeControl : IPluginRuntimeControl
             5 => "d3d.stopped",
             _ => null
         };
-        return name is null ? Array.Empty<PluginRuntimeEvent>() : new[]
-        {
-            new PluginRuntimeEvent(name, new Dictionary<string, string>(StringComparer.Ordinal)
+        if (name is not null)
+            events.Add(new PluginRuntimeEvent(name, new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["state"] = D3DStateName(status.LifecycleState),
                 ["generation"] = status.DeviceGeneration.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["execution_thread_id"] = status.ExecutionThreadId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["live_textures"] = status.LiveTextureCount.ToString(System.Globalization.CultureInfo.InvariantCulture)
-            })
-        };
+            }));
+        return events;
     }
 
     public void Shutdown() => NativeD3DShutdown();
@@ -168,8 +202,14 @@ internal sealed class CurrentRuntimeControl : IPluginRuntimeControl
     private IReadOnlyDictionary<string, string> SetWeather(IReadOnlyDictionary<string, string>? arguments)
     {
         if (arguments is null) throw new InvalidOperationException("OL_E_RUNTIME_ARGUMENT_REQUIRED");
-        weather.WriteAsync(arguments).AsTask().GetAwaiter().GetResult();
-        return readers.ReadWeatherAsync().AsTask().GetAwaiter().GetResult();
+        if (arguments.Count == 0) throw new InvalidOperationException("OL_E_RUNTIME_ARGUMENT_REQUIRED");
+        // Direct writes to both the derived wind projection and ActWeather's
+        // source record were overwritten by the next normal OMSI weather tick
+        // on the exact profiled build. Do not report an ephemeral mutation as
+        // a semantic runtime weather change until the native apply lifecycle
+        // is reconciled.
+        throw new RuntimeOperationException("OL_E_RUNTIME_SETTING_NOT_PERSISTENT",
+            "Direct weather scalar writes are unavailable until OMSI's native weather apply lifecycle is profiled.");
     }
 
     private IReadOnlyDictionary<string, string> SetCamera(IReadOnlyDictionary<string, string>? arguments)
@@ -177,6 +217,32 @@ internal sealed class CurrentRuntimeControl : IPluginRuntimeControl
         if (arguments is null) throw new InvalidOperationException("OL_E_RUNTIME_ARGUMENT_REQUIRED");
         camera.WriteAsync(arguments).AsTask().GetAwaiter().GetResult();
         return readers.ReadCameraAsync().AsTask().GetAwaiter().GetResult();
+    }
+
+    private IReadOnlyDictionary<string, string> LockCamera(IReadOnlyDictionary<string, string>? arguments)
+    {
+        if (arguments is null || !arguments.TryGetValue("family", out var rawFamily) ||
+            !int.TryParse(rawFamily, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var family))
+            throw new InvalidOperationException("OL_E_RUNTIME_ARGUMENT_REQUIRED");
+        int? preset = null;
+        if (arguments.TryGetValue("preset", out var rawPreset))
+        {
+            if (!int.TryParse(rawPreset, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parsedPreset))
+                throw new ArgumentOutOfRangeException("preset", "OL_E_RUNTIME_VALUE_OUT_OF_RANGE");
+            preset = parsedPreset;
+        }
+        cameraLock.ApplyAsync(family, preset).AsTask().GetAwaiter().GetResult();
+        activeCameraLock = new CameraLockPolicy(family, preset);
+        lastCameraLockError = null;
+        Interlocked.Exchange(ref nextCameraLockPoll, Environment.TickCount64 + 100);
+        return OmsiCameraLockWriter.Describe(family, preset);
+    }
+
+    private IReadOnlyDictionary<string, string> UnlockCamera()
+    {
+        activeCameraLock = null;
+        lastCameraLockError = null;
+        return new Dictionary<string, string>(StringComparer.Ordinal) { ["locked"] = "false" };
     }
 
     private IReadOnlyDictionary<string, string> ReadD3DStatus()
@@ -349,16 +415,20 @@ internal sealed class CurrentRuntimeControl : IPluginRuntimeControl
         return readers.ReadRoadVehicleAsync(handle).AsTask().GetAwaiter().GetResult();
     }
 
-    private IReadOnlyDictionary<string, string> MakeBasicRoadVehicle(IReadOnlyDictionary<string, string>? arguments)
+    private IReadOnlyDictionary<string, string> SpawnRoadVehicle(IReadOnlyDictionary<string, string>? arguments)
+    {
+        if (arguments is null || !arguments.TryGetValue("model", out var model)) throw new InvalidOperationException("OL_E_RUNTIME_ARGUMENT_REQUIRED");
+        return MakeBasicRoadVehicle(new Dictionary<string, string>(StringComparer.Ordinal) { ["bus"] = model }, includeNativeAddress: false);
+    }
+
+    private IReadOnlyDictionary<string, string> MakeBasicRoadVehicle(IReadOnlyDictionary<string, string>? arguments, bool includeNativeAddress)
     {
         if (arguments is null || !arguments.TryGetValue("bus", out var bus)) throw new InvalidOperationException("OL_E_RUNTIME_ARGUMENT_REQUIRED");
         ValidateBasicBusIdentity(bus);
         // OMSI's native MakeVehicle accepts a missing path and can choose a
         // fallback vehicle. Reject it before the call so a requested identity
         // can never be reported as a false successful creation.
-        var candidate = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, bus));
-        var installation = Path.GetFullPath(Environment.CurrentDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        if (!candidate.StartsWith(installation, StringComparison.OrdinalIgnoreCase) || !File.Exists(candidate))
+        if (!InstallationPaths.TryGetContainedRelativePath(Environment.CurrentDirectory, bus, out var contained) || !File.Exists(Path.Combine(InstallationPaths.NormalizeRoot(Environment.CurrentDirectory), contained)))
             throw new InvalidOperationException("OL_E_MAKEVEHICLE_BUS_NOT_FOUND");
         var status = NativeMakeVehicleBasic(bus, out var native);
         if (status != 0)
@@ -372,20 +442,18 @@ internal sealed class CurrentRuntimeControl : IPluginRuntimeControl
             throw new InvalidOperationException($"{error}:native_status={native.Status};raw_return={native.RawReturn};before={native.BeforeCount};after={native.AfterCount};delta={native.DeltaCount}");
         }
         var handle = readers.RegisterRoadVehicleHandleAsync(native.CreatedVehicle).AsTask().GetAwaiter().GetResult();
-        return new Dictionary<string, string>(StringComparer.Ordinal)
+        var result = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["bus"] = bus,
             ["created_handle"] = handle,
-            // This field belongs only to the private production-primitive
-            // diagnostic command. Public vehicle APIs continue to expose the
-            // opaque session handle above, never a native address.
-            ["internal_created_native_address"] = $"0x{native.CreatedVehicle:X8}",
             ["before_count"] = native.BeforeCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["after_count"] = native.AfterCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["delta_count"] = native.DeltaCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["raw_native_return"] = native.RawReturn.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["identity_validation"] = "collection-delta-and-profiled-vmt"
         };
+        if (includeNativeAddress) result["internal_created_native_address"] = $"0x{native.CreatedVehicle:X8}";
+        return result;
     }
 
     private static void ValidateBasicBusIdentity(string value)
@@ -567,6 +635,14 @@ internal sealed class CurrentRuntimeControl : IPluginRuntimeControl
         public int NativeStatus { get; }
     }
 
+    private sealed class RuntimeOperationException : Exception
+    {
+        public RuntimeOperationException(string code, string message) : base(message) => Code = code;
+        public string Code { get; }
+    }
+
+    private sealed record CameraLockPolicy(int Family, int? Preset);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeMakeVehicleDiagnostics
     {
@@ -606,15 +682,72 @@ internal sealed class CurrentRuntimeCommandMailbox
             var length = view.ReadInt32(LengthOffset);
             if (length <= 0 || length > Capacity - DataOffset) { view.Write(StateOffset, 0); view.Flush(); return false; }
             var input = new byte[length]; view.ReadArray(DataOffset, input, 0, length);
-            if (!RuntimeCommandWire.TryDeserializeRequest(input, out var command) || command is null || command.SessionId != sessionId)
+            if (!RuntimeCommandWire.TryDeserializeRequest(input, out var command) || command is null)
             {
-                view.Write(StateOffset, 0); view.Flush(); return false;
+                // Undecodable: there is no request identity to answer. The slot
+                // is released; the host's own cleanup covers the timeout.
+                view.Write(StateOffset, 0); view.Write(LengthOffset, 0); view.Flush(); return false;
             }
-            var output = RuntimeCommandWire.SerializeResponse(control.Execute(command));
-            if (output.Length > Capacity - DataOffset) { view.Write(StateOffset, 0); view.Flush(); return false; }
+            byte[] output;
+            if (command.SessionId != sessionId) output = Error(command, "OL_E_RUNTIME_SESSION_MISMATCH");
+            else
+            {
+                // Nothing an operation does may escape into OMSI's UI timer or
+                // leave the request unanswered: failures become a typed result.
+                RuntimeCommandResult? result = null;
+                try { result = control.Execute(command); output = RuntimeCommandWire.SerializeResponse(result); }
+                catch (Exception exception) when (exception is not OutOfMemoryException) { output = Error(command, "OL_E_RUNTIME_OPERATION_FAILED"); }
+                // A bounded list keeps its contract when the row bound alone does
+                // not fit the slot (large maps): trailing rows are dropped and
+                // the result says so (documentation audit BUG-05).
+                if (output.Length > Capacity - DataOffset && result is not null && FitBoundedList(result, Capacity - DataOffset) is { } fitted) output = fitted;
+                // Any other oversized result is reported as a typed error rather
+                // than a silent reset that the host would misread as a timeout.
+                // The error envelope itself carries no values and is always small.
+                if (output.Length > Capacity - DataOffset) output = Error(command, "OL_E_RUNTIME_RESPONSE_TOO_LARGE");
+            }
+            // The host abandons a request on timeout by resetting the slot. A
+            // response for an abandoned or superseded request must never be
+            // published: it would wedge the channel as BUSY for the session.
+            if (view.ReadInt32(StateOffset) != 1 || !RuntimeCommandWire.TryReadRequestId(ReadSlot(view), out var pendingId) || pendingId != command.RequestId) return false;
             view.Write(LengthOffset, output.Length); view.WriteArray(DataOffset, output, 0, output.Length); view.Write(StateOffset, 2); view.Flush(); return true;
         }
         catch (FileNotFoundException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
+    }
+
+    private static byte[] Error(RuntimeCommand command, string code) => RuntimeCommandWire.SerializeResponse(new RuntimeCommandResult(command.SessionId, command.RequestId, false, code));
+
+    // A bounded list result (it carries returned_count and truncated) with rows
+    // keyed "<row>.<n>.<field>" is shrunk by dropping its highest-numbered rows
+    // until the serialized response fits. Returns null for any other result.
+    internal static byte[]? FitBoundedList(RuntimeCommandResult result, int capacity)
+    {
+        if (!result.Succeeded || result.Values is not { } values || !values.ContainsKey("returned_count") || !values.ContainsKey("truncated")) return null;
+        static int? RowOf(string key)
+        {
+            var first = key.IndexOf('.'); if (first < 0) return null;
+            var second = key.IndexOf('.', first + 1); var digits = second < 0 ? key[(first + 1)..] : key[(first + 1)..second];
+            return int.TryParse(digits, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var row) ? row : null;
+        }
+        var rows = values.Keys.Select(RowOf).Where(row => row is not null).Select(row => row!.Value).Distinct().OrderBy(row => row).ToList();
+        while (rows.Count > 0)
+        {
+            rows.RemoveRange(rows.Count - Math.Max(1, rows.Count / 8), Math.Max(1, rows.Count / 8));
+            var keep = rows.ToHashSet();
+            var trimmed = values.Where(pair => RowOf(pair.Key) is not { } row || keep.Contains(row)).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+            trimmed["returned_count"] = keep.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            trimmed["truncated"] = "true";
+            var bytes = RuntimeCommandWire.SerializeResponse(result with { Values = trimmed });
+            if (bytes.Length <= capacity) return bytes;
+        }
+        return null;
+    }
+
+    private static byte[] ReadSlot(MemoryMappedViewAccessor view)
+    {
+        var length = view.ReadInt32(LengthOffset);
+        if (length <= 0 || length > Capacity - DataOffset) return Array.Empty<byte>();
+        var bytes = new byte[length]; view.ReadArray(DataOffset, bytes, 0, length); return bytes;
     }
 }

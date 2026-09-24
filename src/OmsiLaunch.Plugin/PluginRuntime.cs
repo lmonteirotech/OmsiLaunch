@@ -26,6 +26,7 @@ public sealed class PluginRuntime
     private StartupHandoff? pending;
     private CurrentRuntimeCommandMailbox? mailbox;
     private bool executing;
+    private int startupAccepted;
     private long lifecycleEventsNotBefore;
     public bool HasPendingWorld => pending is not null;
     public bool HasRuntimeCommandChannel => mailbox is not null;
@@ -40,17 +41,29 @@ public sealed class PluginRuntime
     {
         var name = Environment.GetEnvironmentVariable("OMSILAUNCH_HANDOFF_NAME");
         if (string.IsNullOrWhiteSpace(name) || !TryReadHandoff(name, out var handoff)) { Emit("plugin.handoff.invalid"); return false; }
+        // OMSI may notify the same plugin more than once during bootstrap. A
+        // successful handoff owns a one-shot native hook, so only its first
+        // accepted Start may validate and arm that hook.
+        if (Interlocked.CompareExchange(ref startupAccepted, 1, 0) != 0) return true;
+        try
+        {
         Emit("plugin.started", ("session_id", handoff.SessionId.ToString("D")));
-        if ((handoff.WorldMode is not WorldMode.NewMap and not WorldMode.SavedSituation) || !handoff.HeadlessStart || handoff.PlayerVehicleEnabled || handoff.DateMode != DateTimeMode.Unset || handoff.TimeMode != DateTimeMode.Unset || (handoff.WorldMode == WorldMode.SavedSituation && string.IsNullOrWhiteSpace(handoff.SituationIdentity))) { Emit("plugin.request.unsupported"); return false; }
-        if (!native.ValidateBuild(handoff.BuildProfileId)) { Emit("plugin.build.invalid"); return false; }
+        if ((handoff.WorldMode is not WorldMode.NewMap and not WorldMode.SavedSituation) || !handoff.HeadlessStart || handoff.PlayerVehicleEnabled || handoff.DateMode != DateTimeMode.Unset || handoff.TimeMode != DateTimeMode.Unset || (handoff.WorldMode == WorldMode.SavedSituation && string.IsNullOrWhiteSpace(handoff.SituationIdentity))) { Emit("plugin.request.unsupported"); Volatile.Write(ref startupAccepted, 0); return false; }
+        if (!native.ValidateBuild(handoff.BuildProfileId)) { Emit("plugin.build.invalid"); Volatile.Write(ref startupAccepted, 0); return false; }
         Emit("plugin.build.validated");
-        if (!native.ArmHeadlessStart()) { Emit("headless.arm.failed"); return false; }
+        if (!native.ArmHeadlessStart()) { Emit("headless.arm.failed"); Volatile.Write(ref startupAccepted, 0); return false; }
         Emit("headless.armed");
         var runtimeChannel = Environment.GetEnvironmentVariable("OMSILAUNCH_RUNTIME_CHANNEL");
         if (!string.IsNullOrWhiteSpace(runtimeChannel) && runtimeControl is not null) mailbox = new CurrentRuntimeCommandMailbox(runtimeChannel, handoff.SessionId);
         native.InstallMainThreadGateway(); pending = handoff;
         scheduleOnUiThread(ConsumePendingWorld);
         return true;
+        }
+        catch
+        {
+            Volatile.Write(ref startupAccepted, 0);
+            throw;
+        }
     }
 
     // Called by the adapter's OMSI UI-thread timer. No runtime command is ever
@@ -68,6 +81,7 @@ public sealed class PluginRuntime
         mailbox = null;
         pending = null;
         runtimeControl?.Shutdown();
+        Volatile.Write(ref startupAccepted, 0);
     }
 
     private void ConsumePendingWorld()

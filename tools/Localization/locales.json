@@ -1,0 +1,572 @@
+{
+  "source_locale": "en-US",
+  "source_website_route": "/en/",
+  "pages": [
+    "README.md",
+    "getting-started/installation.md",
+    "getting-started/first-session.md",
+    "getting-started/api-quick-start.md",
+    "reference/cli.md",
+    "reference/cli-examples.md",
+    "reference/exit-codes.md",
+    "reference/local-control.md",
+    "reference/omsilaunchw.md",
+    "reference/windows-tray.md",
+    "reference/packaging.md",
+    "reference/public-api.md",
+    "reference/public-api-inventory.md",
+    "reference/launchspec.md",
+    "reference/errors.md",
+    "concepts/session-lifecycle.md",
+    "reference/session-profiles.md",
+    "concepts/transactions-and-recovery.md",
+    "concepts/permanent-plugin.md",
+    "reference/capabilities.md",
+    "reference/runtime-control.md",
+    "status/runtime-validation-status.md",
+    "reference/compatibility.md",
+    "reference/known-limitations.md"
+  ],
+  "locales": [
+    {
+      "id": "pt-BR",
+      "name": "Português (Brasil)",
+      "english_name": "Portuguese (Brazil)",
+      "website_route": "/",
+      "windows_ui": "pt-BR",
+      "banner": "Tradução da [página original em inglês]({source}) do OmsiLaunch 0.1.0-beta3. A página em inglês é a referência normativa: se as duas divergirem, valem a página em inglês e o código.",
+      "forbidden": [
+        "\\bficheiros?\\b",
+        "\\butilizador",
+        "\\becrã\\b",
+        "\\bregistos?\\b",
+        "\\bestá a [a-zà-ú]+r\\b",
+        "\\bestão a [a-zà-ú]+r\\b"
+      ],
+      "inventory": {
+        "title": "Inventário da API pública",
+        "intro": "Esta página é gerada a partir dos assemblies compilados por `tests/OmsiLaunch.DocumentationTests` (`dotnet run --project tests/OmsiLaunch.DocumentationTests -- --write-inventory`); o gate de documentação falha quando ela deixa de corresponder ao código. Ela lista todos os tipos exportados de `OmsiLaunch.Api`, `OmsiLaunch.Core` e `OmsiLaunch.Process`, com a estabilidade de cada um e a assinatura de cada membro público. A semântica, as pré-condições, os erros e os exemplos estão na página indicada em cada título (padrão: [API pública](public-api.md)). Vocabulário de estabilidade: `STABLE_BETA`, `EXPERIMENTAL`, `PARTIAL`, `INTERNAL` (público por motivos técnicos, não é uma superfície de integração), `UNAVAILABLE` (veja [API pública](public-api.md#stability-vocabulary)). Os membros de record gerados pelo compilador (`Equals`, `GetHashCode`, `ToString`, `Deconstruct`, `<Clone>$`, `EqualityContract`) são omitidos.",
+        "member": "Membro",
+        "signature": "Assinatura",
+        "type_line": "{kind} em {ns}. Estabilidade: {stability}. Semântica:",
+        "kinds": {
+          "Sealed record": "Record selado",
+          "Sealed class": "Classe selada",
+          "Static class": "Classe estática",
+          "Record struct": "Record struct",
+          "Interface": "Interface",
+          "Enum": "Enum"
+        },
+        "members": {
+          "constant": "constante",
+          "constructor": "construtor",
+          "extension method": "método de extensão",
+          "method": "método",
+          "property": "propriedade",
+          "static field": "campo estático",
+          "static method": "método estático",
+          "static property": "propriedade estática",
+          "value": "valor"
+        }
+      }
+    },
+    {
+      "id": "pt-PT",
+      "name": "Português (Portugal)",
+      "english_name": "Portuguese (Portugal)",
+      "website_route": "/pt-pt/",
+      "windows_ui": "en",
+      "banner": "Tradução da [página original em inglês]({source}) do OmsiLaunch 0.1.0-beta3. A página em inglês é a referência normativa: em caso de divergência, prevalecem a página em inglês e o código.",
+      "forbidden": [
+        "\\bvocês?\\b",
+        "\\barquivos?\\b",
+        "\\busuários?\\b",
+        "\\btelas?\\b",
+        "\\bgerenci",
+        "\\bdeletar\\b",
+        "\\bregistros?\\b",
+        "\\bcadastr"
+      ],
+      "inventory": {
+        "title": "Inventário da API pública",
+        "intro": "Esta página é gerada a partir dos assemblies compilados por `tests/OmsiLaunch.DocumentationTests` (`dotnet run --project tests/OmsiLaunch.DocumentationTests -- --write-inventory`); o gate de documentação falha quando deixa de corresponder ao código. Enumera todos os tipos exportados de `OmsiLaunch.Api`, `OmsiLaunch.Core` e `OmsiLaunch.Process`, com a respetiva estabilidade e a assinatura de cada membro público. A semântica, as pré-condições, os erros e os exemplos estão documentados na página indicada em cada título (predefinição: [API pública](public-api.md)). Vocabulário de estabilidade: `STABLE_BETA`, `EXPERIMENTAL`, `PARTIAL`, `INTERNAL` (público por razões técnicas, não constitui uma superfície de integração), `UNAVAILABLE` (consulte [API pública](public-api.md#stability-vocabulary)). Os membros de record gerados pelo compilador (`Equals`, `GetHashCode`, `ToString`, `Deconstruct`, `<Clone>$`, `EqualityContract`) são omitidos.",
+        "member": "Membro",
+        "signature": "Assinatura",
+        "type_line": "{kind} em {ns}. Estabilidade: {stability}. Semântica:",
+        "kinds": {
+          "Sealed record": "Record selado",
+          "Sealed class": "Classe selada",
+          "Static class": "Classe estática",
+          "Record struct": "Record struct",
+          "Interface": "Interface",
+          "Enum": "Enum"
+        },
+        "members": {
+          "constant": "constante",
+          "constructor": "construtor",
+          "extension method": "método de extensão",
+          "method": "método",
+          "property": "propriedade",
+          "static field": "campo estático",
+          "static method": "método estático",
+          "static property": "propriedade estática",
+          "value": "valor"
+        }
+      }
+    },
+    {
+      "id": "en-GB",
+      "name": "English (United Kingdom)",
+      "english_name": "English (United Kingdom)",
+      "website_route": "/en-gb/",
+      "windows_ui": "en",
+      "banner": "British English edition of the [canonical page]({source}) for OmsiLaunch 0.1.0-beta3. The US English page is normative: where the two differ, it and the code take precedence.",
+      "forbidden": [
+        "\\bbehavior",
+        "\\bcolor\\b",
+        "\\binitializ",
+        "\\bnormaliz",
+        "\\brecogniz",
+        "\\borganiz",
+        "\\banalyz",
+        "\\bfinaliz",
+        "\\bcancel(?:ed|ing)\\b",
+        "\\bcatalog\\b"
+      ],
+      "inventory": {
+        "title": "Public API Inventory",
+        "intro": "This page is generated from the compiled assemblies by `tests/OmsiLaunch.DocumentationTests` (`dotnet run --project tests/OmsiLaunch.DocumentationTests -- --write-inventory`); the documentation gate fails when it no longer matches the code. It lists every exported type of `OmsiLaunch.Api`, `OmsiLaunch.Core` and `OmsiLaunch.Process` with its stability and the signature of every public member. Semantics, preconditions, errors and examples are documented on the page named in each heading (default: [public API](public-api.md)). Stability vocabulary: `STABLE_BETA`, `EXPERIMENTAL`, `PARTIAL`, `INTERNAL` (public for technical reasons, not an integration surface), `UNAVAILABLE` (see [public API](public-api.md#stability-vocabulary)). Compiler-generated record members (`Equals`, `GetHashCode`, `ToString`, `Deconstruct`, `<Clone>$`, `EqualityContract`) are omitted.",
+        "member": "Member",
+        "signature": "Signature",
+        "type_line": "{kind} in {ns}. Stability: {stability}. Semantics:",
+        "kinds": {
+          "Sealed record": "Sealed record",
+          "Sealed class": "Sealed class",
+          "Static class": "Static class",
+          "Record struct": "Record struct",
+          "Interface": "Interface",
+          "Enum": "Enum"
+        },
+        "members": {
+          "constant": "constant",
+          "constructor": "constructor",
+          "extension method": "extension method",
+          "method": "method",
+          "property": "property",
+          "static field": "static field",
+          "static method": "static method",
+          "static property": "static property",
+          "value": "value"
+        }
+      }
+    },
+    {
+      "id": "fr-FR",
+      "name": "Français",
+      "english_name": "French",
+      "website_route": "/fr/",
+      "windows_ui": "fr",
+      "banner": "Traduction de la [page originale en anglais]({source}) d’OmsiLaunch 0.1.0-beta3. La page anglaise fait foi : en cas de divergence, la page anglaise et le code prévalent.",
+      "forbidden": [],
+      "inventory": {
+        "title": "Inventaire de l’API publique",
+        "intro": "Cette page est générée à partir des assemblies compilés par `tests/OmsiLaunch.DocumentationTests` (`dotnet run --project tests/OmsiLaunch.DocumentationTests -- --write-inventory`) ; le contrôle de la documentation échoue lorsqu’elle ne correspond plus au code. Elle répertorie chaque type exporté de `OmsiLaunch.Api`, `OmsiLaunch.Core` et `OmsiLaunch.Process`, avec sa stabilité et la signature de chaque membre public. La sémantique, les préconditions, les erreurs et les exemples sont documentés sur la page indiquée dans chaque titre (par défaut : [API publique](public-api.md)). Vocabulaire de stabilité : `STABLE_BETA`, `EXPERIMENTAL`, `PARTIAL`, `INTERNAL` (public pour des raisons techniques, ce n’est pas une surface d’intégration), `UNAVAILABLE` (voir [API publique](public-api.md#stability-vocabulary)). Les membres de record générés par le compilateur (`Equals`, `GetHashCode`, `ToString`, `Deconstruct`, `<Clone>$`, `EqualityContract`) sont omis.",
+        "member": "Membre",
+        "signature": "Signature",
+        "type_line": "{kind} dans {ns}. Stabilité : {stability}. Sémantique :",
+        "kinds": {
+          "Sealed record": "Record scellé",
+          "Sealed class": "Classe scellée",
+          "Static class": "Classe statique",
+          "Record struct": "Record struct",
+          "Interface": "Interface",
+          "Enum": "Énumération"
+        },
+        "members": {
+          "constant": "constante",
+          "constructor": "constructeur",
+          "extension method": "méthode d’extension",
+          "method": "méthode",
+          "property": "propriété",
+          "static field": "champ statique",
+          "static method": "méthode statique",
+          "static property": "propriété statique",
+          "value": "valeur"
+        }
+      }
+    },
+    {
+      "id": "de-DE",
+      "name": "Deutsch",
+      "english_name": "German",
+      "website_route": "/de/",
+      "windows_ui": "de",
+      "banner": "Übersetzung der [englischen Originalseite]({source}) für OmsiLaunch 0.1.0-beta3. Maßgeblich ist die englische Seite: Bei Abweichungen gelten die englische Seite und der Code.",
+      "forbidden": [],
+      "inventory": {
+        "title": "Inventar der öffentlichen API",
+        "intro": "Diese Seite wird von `tests/OmsiLaunch.DocumentationTests` aus den kompilierten Assemblies erzeugt (`dotnet run --project tests/OmsiLaunch.DocumentationTests -- --write-inventory`); die Dokumentationsprüfung schlägt fehl, sobald sie nicht mehr zum Code passt. Sie führt jeden exportierten Typ von `OmsiLaunch.Api`, `OmsiLaunch.Core` und `OmsiLaunch.Process` mit seiner Stabilität und der Signatur jedes öffentlichen Members auf. Semantik, Vorbedingungen, Fehler und Beispiele sind auf der Seite dokumentiert, die in der jeweiligen Überschrift genannt ist (Standard: [öffentliche API](public-api.md)). Stabilitätsstufen: `STABLE_BETA`, `EXPERIMENTAL`, `PARTIAL`, `INTERNAL` (aus technischen Gründen öffentlich, keine Integrationsschnittstelle), `UNAVAILABLE` (siehe [öffentliche API](public-api.md#stability-vocabulary)). Vom Compiler erzeugte Record-Member (`Equals`, `GetHashCode`, `ToString`, `Deconstruct`, `<Clone>$`, `EqualityContract`) werden nicht aufgeführt.",
+        "member": "Member",
+        "signature": "Signatur",
+        "type_line": "{kind} in {ns}. Stabilität: {stability}. Semantik:",
+        "kinds": {
+          "Sealed record": "Versiegelter Record",
+          "Sealed class": "Versiegelte Klasse",
+          "Static class": "Statische Klasse",
+          "Record struct": "Record struct",
+          "Interface": "Interface",
+          "Enum": "Enumeration"
+        },
+        "members": {
+          "constant": "Konstante",
+          "constructor": "Konstruktor",
+          "extension method": "Erweiterungsmethode",
+          "method": "Methode",
+          "property": "Eigenschaft",
+          "static field": "statisches Feld",
+          "static method": "statische Methode",
+          "static property": "statische Eigenschaft",
+          "value": "Wert"
+        }
+      }
+    },
+    {
+      "id": "es-ES",
+      "name": "Español (España)",
+      "english_name": "Spanish (Spain)",
+      "website_route": "/es/",
+      "windows_ui": "en",
+      "banner": "Traducción de la [página original en inglés]({source}) de OmsiLaunch 0.1.0-beta3. La página en inglés es la referencia normativa: si difieren, prevalecen la página en inglés y el código.",
+      "forbidden": [
+        "\\bcomputadora",
+        "\\barchivo de computadora",
+        "\\bustedes pueden\\b"
+      ],
+      "inventory": {
+        "title": "Inventario de la API pública",
+        "intro": "Esta página se genera a partir de los ensamblados compilados mediante `tests/OmsiLaunch.DocumentationTests` (`dotnet run --project tests/OmsiLaunch.DocumentationTests -- --write-inventory`); la comprobación de la documentación falla cuando deja de coincidir con el código. Enumera cada tipo exportado de `OmsiLaunch.Api`, `OmsiLaunch.Core` y `OmsiLaunch.Process`, con su estabilidad y la firma de cada miembro público. La semántica, las precondiciones, los errores y los ejemplos se documentan en la página indicada en cada encabezado (por defecto: [API pública](public-api.md)). Vocabulario de estabilidad: `STABLE_BETA`, `EXPERIMENTAL`, `PARTIAL`, `INTERNAL` (público por motivos técnicos, no es una superficie de integración), `UNAVAILABLE` (véase [API pública](public-api.md#stability-vocabulary)). Se omiten los miembros de record generados por el compilador (`Equals`, `GetHashCode`, `ToString`, `Deconstruct`, `<Clone>$`, `EqualityContract`).",
+        "member": "Miembro",
+        "signature": "Firma",
+        "type_line": "{kind} en {ns}. Estabilidad: {stability}. Semántica:",
+        "kinds": {
+          "Sealed record": "Record sellado",
+          "Sealed class": "Clase sellada",
+          "Static class": "Clase estática",
+          "Record struct": "Record struct",
+          "Interface": "Interfaz",
+          "Enum": "Enumeración"
+        },
+        "members": {
+          "constant": "constante",
+          "constructor": "constructor",
+          "extension method": "método de extensión",
+          "method": "método",
+          "property": "propiedad",
+          "static field": "campo estático",
+          "static method": "método estático",
+          "static property": "propiedad estática",
+          "value": "valor"
+        }
+      }
+    },
+    {
+      "id": "es-LATAM",
+      "name": "Español (Latinoamérica)",
+      "english_name": "Spanish (Latin America)",
+      "website_route": "/es-latam/",
+      "windows_ui": "en",
+      "banner": "Traducción de la [página original en inglés]({source}) de OmsiLaunch 0.1.0-beta3. La página en inglés es la referencia normativa: si hay diferencias, prevalecen la página en inglés y el código.",
+      "forbidden": [
+        "\\bvosotros\\b",
+        "\\bordenador",
+        "\\bfichero",
+        "\\b[a-zñ]+(?:áis|éis)\\b",
+        "\\bcoger\\b"
+      ],
+      "inventory": {
+        "title": "Inventario de la API pública",
+        "intro": "Esta página se genera a partir de los ensamblados compilados con `tests/OmsiLaunch.DocumentationTests` (`dotnet run --project tests/OmsiLaunch.DocumentationTests -- --write-inventory`); la verificación de la documentación falla cuando la página ya no coincide con el código. Enumera cada tipo exportado de `OmsiLaunch.Api`, `OmsiLaunch.Core` y `OmsiLaunch.Process`, con su estabilidad y la firma de cada miembro público. La semántica, las precondiciones, los errores y los ejemplos están documentados en la página indicada en cada encabezado (predeterminada: [API pública](public-api.md)). Vocabulario de estabilidad: `STABLE_BETA`, `EXPERIMENTAL`, `PARTIAL`, `INTERNAL` (público por razones técnicas, no es una superficie de integración), `UNAVAILABLE` (consulta [API pública](public-api.md#stability-vocabulary)). Se omiten los miembros de record generados por el compilador (`Equals`, `GetHashCode`, `ToString`, `Deconstruct`, `<Clone>$`, `EqualityContract`).",
+        "member": "Miembro",
+        "signature": "Firma",
+        "type_line": "{kind} en {ns}. Estabilidad: {stability}. Semántica:",
+        "kinds": {
+          "Sealed record": "Record sellado",
+          "Sealed class": "Clase sellada",
+          "Static class": "Clase estática",
+          "Record struct": "Record struct",
+          "Interface": "Interfaz",
+          "Enum": "Enumeración"
+        },
+        "members": {
+          "constant": "constante",
+          "constructor": "constructor",
+          "extension method": "método de extensión",
+          "method": "método",
+          "property": "propiedad",
+          "static field": "campo estático",
+          "static method": "método estático",
+          "static property": "propiedad estática",
+          "value": "valor"
+        }
+      }
+    },
+    {
+      "id": "it-IT",
+      "name": "Italiano",
+      "english_name": "Italian",
+      "website_route": "/it/",
+      "windows_ui": "en",
+      "banner": "Traduzione della [pagina originale in inglese]({source}) di OmsiLaunch 0.1.0-beta3. La pagina inglese è normativa: in caso di differenze prevalgono la pagina inglese e il codice.",
+      "forbidden": [],
+      "inventory": {
+        "title": "Inventario dell’API pubblica",
+        "intro": "Questa pagina è generata dagli assembly compilati tramite `tests/OmsiLaunch.DocumentationTests` (`dotnet run --project tests/OmsiLaunch.DocumentationTests -- --write-inventory`); il controllo della documentazione fallisce quando non corrisponde più al codice. Elenca ogni tipo esportato da `OmsiLaunch.Api`, `OmsiLaunch.Core` e `OmsiLaunch.Process`, con la sua stabilità e la firma di ogni membro pubblico. Semantica, precondizioni, errori ed esempi sono documentati nella pagina indicata in ciascun titolo (predefinita: [API pubblica](public-api.md)). Vocabolario di stabilità: `STABLE_BETA`, `EXPERIMENTAL`, `PARTIAL`, `INTERNAL` (pubblico per motivi tecnici, non è una superficie di integrazione), `UNAVAILABLE` (vedere [API pubblica](public-api.md#stability-vocabulary)). I membri dei record generati dal compilatore (`Equals`, `GetHashCode`, `ToString`, `Deconstruct`, `<Clone>$`, `EqualityContract`) sono omessi.",
+        "member": "Membro",
+        "signature": "Firma",
+        "type_line": "{kind} in {ns}. Stabilità: {stability}. Semantica:",
+        "kinds": {
+          "Sealed record": "Record sealed",
+          "Sealed class": "Classe sealed",
+          "Static class": "Classe statica",
+          "Record struct": "Record struct",
+          "Interface": "Interfaccia",
+          "Enum": "Enumerazione"
+        },
+        "members": {
+          "constant": "costante",
+          "constructor": "costruttore",
+          "extension method": "metodo di estensione",
+          "method": "metodo",
+          "property": "proprietà",
+          "static field": "campo statico",
+          "static method": "metodo statico",
+          "static property": "proprietà statica",
+          "value": "valore"
+        }
+      }
+    },
+    {
+      "id": "pl-PL",
+      "name": "Polski",
+      "english_name": "Polish",
+      "website_route": "/pl/",
+      "windows_ui": "pl",
+      "banner": "Tłumaczenie [oryginalnej strony w języku angielskim]({source}) dla OmsiLaunch 0.1.0-beta3. Wiążąca jest strona angielska: w razie rozbieżności obowiązują strona angielska i kod.",
+      "forbidden": [],
+      "inventory": {
+        "title": "Inwentarz publicznego API",
+        "intro": "Ta strona jest generowana z skompilowanych assembly przez `tests/OmsiLaunch.DocumentationTests` (`dotnet run --project tests/OmsiLaunch.DocumentationTests -- --write-inventory`); kontrola dokumentacji kończy się błędem, gdy strona przestaje odpowiadać kodowi. Wymienia każdy eksportowany typ z `OmsiLaunch.Api`, `OmsiLaunch.Core` i `OmsiLaunch.Process` wraz z jego stabilnością i sygnaturą każdej publicznej składowej. Semantyka, warunki wstępne, błędy i przykłady są opisane na stronie wskazanej w każdym nagłówku (domyślnie: [publiczne API](public-api.md)). Słownik stabilności: `STABLE_BETA`, `EXPERIMENTAL`, `PARTIAL`, `INTERNAL` (publiczne z przyczyn technicznych, nie jest powierzchnią integracji), `UNAVAILABLE` (zob. [publiczne API](public-api.md#stability-vocabulary)). Składowe rekordów generowane przez kompilator (`Equals`, `GetHashCode`, `ToString`, `Deconstruct`, `<Clone>$`, `EqualityContract`) zostały pominięte.",
+        "member": "Składowa",
+        "signature": "Sygnatura",
+        "type_line": "{kind} w {ns}. Stabilność: {stability}. Semantyka:",
+        "kinds": {
+          "Sealed record": "Zapieczętowany rekord",
+          "Sealed class": "Zapieczętowana klasa",
+          "Static class": "Klasa statyczna",
+          "Record struct": "Record struct",
+          "Interface": "Interfejs",
+          "Enum": "Wyliczenie"
+        },
+        "members": {
+          "constant": "stała",
+          "constructor": "konstruktor",
+          "extension method": "metoda rozszerzająca",
+          "method": "metoda",
+          "property": "właściwość",
+          "static field": "pole statyczne",
+          "static method": "metoda statyczna",
+          "static property": "właściwość statyczna",
+          "value": "wartość"
+        }
+      }
+    },
+    {
+      "id": "nl-NL",
+      "name": "Nederlands",
+      "english_name": "Dutch",
+      "website_route": "/nl/",
+      "windows_ui": "en",
+      "banner": "Vertaling van de [oorspronkelijke Engelse pagina]({source}) voor OmsiLaunch 0.1.0-beta3. De Engelse pagina is normatief: bij verschillen gelden de Engelse pagina en de code.",
+      "forbidden": [],
+      "inventory": {
+        "title": "Inventaris van de publieke API",
+        "intro": "Deze pagina wordt door `tests/OmsiLaunch.DocumentationTests` gegenereerd uit de gecompileerde assemblies (`dotnet run --project tests/OmsiLaunch.DocumentationTests -- --write-inventory`); de documentatiecontrole faalt zodra ze niet meer overeenkomt met de code. Ze vermeldt elk geëxporteerd type van `OmsiLaunch.Api`, `OmsiLaunch.Core` en `OmsiLaunch.Process` met de stabiliteit en de signatuur van elk publiek lid. Semantiek, voorwaarden, fouten en voorbeelden staan op de pagina die in elke kop wordt genoemd (standaard: [publieke API](public-api.md)). Stabiliteitsniveaus: `STABLE_BETA`, `EXPERIMENTAL`, `PARTIAL`, `INTERNAL` (om technische redenen publiek, geen integratie-oppervlak), `UNAVAILABLE` (zie [publieke API](public-api.md#stability-vocabulary)). Door de compiler gegenereerde recordleden (`Equals`, `GetHashCode`, `ToString`, `Deconstruct`, `<Clone>$`, `EqualityContract`) zijn weggelaten.",
+        "member": "Lid",
+        "signature": "Signatuur",
+        "type_line": "{kind} in {ns}. Stabiliteit: {stability}. Semantiek:",
+        "kinds": {
+          "Sealed record": "Sealed record",
+          "Sealed class": "Sealed klasse",
+          "Static class": "Statische klasse",
+          "Record struct": "Record struct",
+          "Interface": "Interface",
+          "Enum": "Enumeratie"
+        },
+        "members": {
+          "constant": "constante",
+          "constructor": "constructor",
+          "extension method": "extensiemethode",
+          "method": "methode",
+          "property": "eigenschap",
+          "static field": "statisch veld",
+          "static method": "statische methode",
+          "static property": "statische eigenschap",
+          "value": "waarde"
+        }
+      }
+    },
+    {
+      "id": "ru-RU",
+      "name": "Русский",
+      "english_name": "Russian",
+      "website_route": "/ru/",
+      "windows_ui": "en",
+      "banner": "Перевод [исходной страницы на английском языке]({source}) для OmsiLaunch 0.1.0-beta3. Нормативной является английская страница: при расхождениях приоритет имеют английская страница и код.",
+      "forbidden": [],
+      "inventory": {
+        "title": "Перечень публичного API",
+        "intro": "Эта страница генерируется из скомпилированных сборок с помощью `tests/OmsiLaunch.DocumentationTests` (`dotnet run --project tests/OmsiLaunch.DocumentationTests -- --write-inventory`); проверка документации завершается ошибкой, если страница перестаёт соответствовать коду. Здесь перечислены все экспортируемые типы `OmsiLaunch.Api`, `OmsiLaunch.Core` и `OmsiLaunch.Process` с уровнем стабильности и сигнатурой каждого публичного члена. Семантика, предусловия, ошибки и примеры описаны на странице, указанной в каждом заголовке (по умолчанию: [публичный API](public-api.md)). Уровни стабильности: `STABLE_BETA`, `EXPERIMENTAL`, `PARTIAL`, `INTERNAL` (публичный по техническим причинам, не является интерфейсом интеграции), `UNAVAILABLE` (см. [публичный API](public-api.md#stability-vocabulary)). Члены записей, сгенерированные компилятором (`Equals`, `GetHashCode`, `ToString`, `Deconstruct`, `<Clone>$`, `EqualityContract`), не приводятся.",
+        "member": "Член",
+        "signature": "Сигнатура",
+        "type_line": "{kind} в {ns}. Стабильность: {stability}. Семантика:",
+        "kinds": {
+          "Sealed record": "Запечатанная запись (sealed record)",
+          "Sealed class": "Запечатанный класс",
+          "Static class": "Статический класс",
+          "Record struct": "Record struct",
+          "Interface": "Интерфейс",
+          "Enum": "Перечисление"
+        },
+        "members": {
+          "constant": "константа",
+          "constructor": "конструктор",
+          "extension method": "метод расширения",
+          "method": "метод",
+          "property": "свойство",
+          "static field": "статическое поле",
+          "static method": "статический метод",
+          "static property": "статическое свойство",
+          "value": "значение"
+        }
+      }
+    },
+    {
+      "id": "zh-CN",
+      "name": "简体中文",
+      "english_name": "Chinese (Simplified)",
+      "website_route": "/zh-cn/",
+      "windows_ui": "en",
+      "banner": "本页是 OmsiLaunch 0.1.0-beta3 [英文原始页面]({source}) 的译文。英文页面为规范文本：如有出入，以英文页面和代码为准。",
+      "forbidden": [
+        "[這們個為說時發過還進對數據後務調實應該錄連錯誤運話員讀寫與關線項類載當現問題執態統從頁視動選擇無顯屬輸構結會塊參備編譯鏈節單層維稱變換歷級斷開啟標籤證驗測試報權遠網絡緩離創刪檢轉響請協議規範細則須覽圖僅將義處間產訊釋於]"
+      ],
+      "inventory": {
+        "title": "公共 API 清单",
+        "intro": "本页由 `tests/OmsiLaunch.DocumentationTests` 根据编译后的程序集生成（`dotnet run --project tests/OmsiLaunch.DocumentationTests -- --write-inventory`）；当本页与代码不再一致时，文档检查会失败。本页列出 `OmsiLaunch.Api`、`OmsiLaunch.Core` 和 `OmsiLaunch.Process` 导出的每个类型及其稳定性，以及每个公共成员的签名。语义、前置条件、错误和示例记录在各标题所指的页面中（默认：[公共 API](public-api.md)）。稳定性术语：`STABLE_BETA`、`EXPERIMENTAL`、`PARTIAL`、`INTERNAL`（出于技术原因而公开，不属于集成接口）、`UNAVAILABLE`（参见[公共 API](public-api.md#stability-vocabulary)）。编译器生成的 record 成员（`Equals`、`GetHashCode`、`ToString`、`Deconstruct`、`<Clone>$`、`EqualityContract`）不予列出。",
+        "member": "成员",
+        "signature": "签名",
+        "type_line": "{kind}，位于 {ns}。稳定性：{stability}。语义：",
+        "kinds": {
+          "Sealed record": "密封 record",
+          "Sealed class": "密封类",
+          "Static class": "静态类",
+          "Record struct": "record struct",
+          "Interface": "接口",
+          "Enum": "枚举"
+        },
+        "members": {
+          "constant": "常量",
+          "constructor": "构造函数",
+          "extension method": "扩展方法",
+          "method": "方法",
+          "property": "属性",
+          "static field": "静态字段",
+          "static method": "静态方法",
+          "static property": "静态属性",
+          "value": "值"
+        }
+      }
+    },
+    {
+      "id": "zh-TW",
+      "name": "繁體中文（台灣）",
+      "english_name": "Chinese (Traditional, Taiwan)",
+      "website_route": "/zh-tw/",
+      "windows_ui": "en",
+      "banner": "本頁為 OmsiLaunch 0.1.0-beta3 [英文原始頁面]({source}) 的翻譯。英文頁面為規範版本：若有出入，以英文頁面與程式碼為準。",
+      "forbidden": [
+        "[这们个为说时发过还进对数据后务调实应该录连错误运话员读写与关线项类载当现问题执态统从页视动选择无显属输构结会块参备编译链节单层维称变换历级断开启标签证验测试报权远网络缓离创删检转响请协议规范细则须览图仅将义处间产讯释]",
+        "软件",
+        "文件夹",
+        "默认",
+        "信息",
+        "服务器",
+        "程序集",
+        "进程",
+        "线程",
+        "用户"
+      ],
+      "inventory": {
+        "title": "公開 API 清單",
+        "intro": "本頁由 `tests/OmsiLaunch.DocumentationTests` 依據編譯後的組件產生（`dotnet run --project tests/OmsiLaunch.DocumentationTests -- --write-inventory`）；當本頁與程式碼不再一致時，文件檢查便會失敗。本頁列出 `OmsiLaunch.Api`、`OmsiLaunch.Core` 與 `OmsiLaunch.Process` 匯出的每個型別及其穩定性，以及每個公開成員的簽章。語意、前置條件、錯誤與範例記載於各標題所指的頁面（預設：[公開 API](public-api.md)）。穩定性用語：`STABLE_BETA`、`EXPERIMENTAL`、`PARTIAL`、`INTERNAL`（基於技術原因而公開，並非整合介面）、`UNAVAILABLE`（請參閱[公開 API](public-api.md#stability-vocabulary)）。編譯器產生的 record 成員（`Equals`、`GetHashCode`、`ToString`、`Deconstruct`、`<Clone>$`、`EqualityContract`）不予列出。",
+        "member": "成員",
+        "signature": "簽章",
+        "type_line": "{kind}，位於 {ns}。穩定性：{stability}。語意：",
+        "kinds": {
+          "Sealed record": "密封 record",
+          "Sealed class": "密封類別",
+          "Static class": "靜態類別",
+          "Record struct": "record struct",
+          "Interface": "介面",
+          "Enum": "列舉"
+        },
+        "members": {
+          "constant": "常數",
+          "constructor": "建構函式",
+          "extension method": "擴充方法",
+          "method": "方法",
+          "property": "屬性",
+          "static field": "靜態欄位",
+          "static method": "靜態方法",
+          "static property": "靜態屬性",
+          "value": "值"
+        }
+      }
+    },
+    {
+      "id": "ja-JP",
+      "name": "日本語",
+      "english_name": "Japanese",
+      "website_route": "/ja/",
+      "windows_ui": "en",
+      "banner": "このページは OmsiLaunch 0.1.0-beta3 の[英語版の原文ページ]({source})の翻訳です。規範となるのは英語版です。内容が異なる場合は、英語版のページとコードが優先されます。",
+      "forbidden": [],
+      "inventory": {
+        "title": "公開 API インベントリ",
+        "intro": "このページは、コンパイル済みアセンブリから `tests/OmsiLaunch.DocumentationTests` によって生成されます（`dotnet run --project tests/OmsiLaunch.DocumentationTests -- --write-inventory`）。コードと一致しなくなると、ドキュメントのチェックが失敗します。`OmsiLaunch.Api`、`OmsiLaunch.Core`、`OmsiLaunch.Process` がエクスポートするすべての型について、その安定性とすべての public メンバーのシグネチャを記載しています。セマンティクス、前提条件、エラー、使用例は、各見出しに示したページに記載されています（既定: [公開 API](public-api.md)）。安定性の区分: `STABLE_BETA`、`EXPERIMENTAL`、`PARTIAL`、`INTERNAL`（技術的な理由で public になっているもので、統合用のインターフェイスではありません）、`UNAVAILABLE`（[公開 API](public-api.md#stability-vocabulary) を参照）。コンパイラが生成する record のメンバー（`Equals`、`GetHashCode`、`ToString`、`Deconstruct`、`<Clone>$`、`EqualityContract`）は省略しています。",
+        "member": "メンバー",
+        "signature": "シグネチャ",
+        "type_line": "{kind}（{ns}）。安定性: {stability}。セマンティクス:",
+        "kinds": {
+          "Sealed record": "sealed record",
+          "Sealed class": "sealed クラス",
+          "Static class": "static クラス",
+          "Record struct": "record struct",
+          "Interface": "インターフェイス",
+          "Enum": "列挙型"
+        },
+        "members": {
+          "constant": "定数",
+          "constructor": "コンストラクター",
+          "extension method": "拡張メソッド",
+          "method": "メソッド",
+          "property": "プロパティ",
+          "static field": "static フィールド",
+          "static method": "static メソッド",
+          "static property": "static プロパティ",
+          "value": "値"
+        }
+      }
+    }
+  ]
+}

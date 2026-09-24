@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>OmsiLaunch.Controller</AssemblyName><TargetFramework>net6.0-windows</TargetFramework><Platforms>x64</Platforms><PlatformTarget>x64</PlatformTarget><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><UseAppHost>false</UseAppHost></PropertyGroup>
+  <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>OmsiLaunch.Controller</AssemblyName><TargetFramework>net6.0-windows</TargetFramework><Platforms>x64</Platforms><PlatformTarget>x64</PlatformTarget><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><UseAppHost>false</UseAppHost><UseWindowsForms>true</UseWindowsForms></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\OmsiLaunch.Api\OmsiLaunch.Api.csproj" />
     <ProjectReference Include="..\..\src\OmsiLaunch.Core\OmsiLaunch.Core.csproj" />

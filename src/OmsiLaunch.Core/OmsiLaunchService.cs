@@ -7,7 +7,9 @@ using OmsiLaunch.Process;
 
 namespace OmsiLaunch.Core;
 
-public sealed record OmsiLaunchRuntimePaths(string PluginBuildDirectory, string NativeBridgePath);
+// ReleaseManifestPath is the packaged release-manifest.json when the controller
+// runs from an installed package; it supplies the expected plugin hashes.
+public sealed record OmsiLaunchRuntimePaths(string PluginBuildDirectory, string NativeBridgePath, string? ReleaseManifestPath = null);
 
 public sealed class OmsiLaunchService : IOmsiLaunch
 {
@@ -25,18 +27,31 @@ public sealed class OmsiLaunchService : IOmsiLaunch
         var plan = await planner.PlanAsync(spec, cancellationToken).ConfigureAwait(false);
         try
         {
-            var artifacts = RuntimeArtifactSet.Load(runtimePaths.PluginBuildDirectory, runtimePaths.NativeBridgePath);
-            return plan with { RuntimeArtifacts = artifacts.Artifacts.Select(x => x.DestinationRelativePath).Append("OmsiLaunch startup handoff v4").ToArray() };
+            var artifacts = LoadArtifacts();
+            // The installed closure is part of runnability: a plugin missing from
+            // or altered in plugins\ must make the plan non-runnable, so that the
+            // re-plan in StartSessionAsync rejects before any session exists.
+            artifacts.ValidateInstalled(spec.Installation.RootPath);
+            var diagnostics = plan.Diagnostics.Append(new LaunchDiagnostic("plugin.integrity.reference", artifacts.IntegrityReference)).ToArray();
+            return plan with { RuntimeArtifacts = artifacts.Artifacts.Select(x => x.DestinationRelativePath).Append("OmsiLaunch startup handoff v4").ToArray(), Diagnostics = diagnostics };
         }
-        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or InvalidDataException)
         {
-            var diagnostics = plan.Diagnostics.Append(new LaunchDiagnostic("OL_E_RUNTIME_ARTIFACT_MISSING", exception.Message)).ToArray();
+            var code = exception.Message.StartsWith("OL_E_PERMANENT_PLUGIN_", StringComparison.Ordinal) ? exception.Message.Split(':')[0] : "OL_E_RUNTIME_ARTIFACT_MISSING";
+            var detail = exception is FileNotFoundException { FileName: { } file } ? exception.Message + ": " + file : exception.Message;
+            var diagnostics = plan.Diagnostics.Append(new LaunchDiagnostic(code, detail)).ToArray();
             return plan with { Diagnostics = diagnostics, IsRunnable = false };
         }
     }
     public async Task<SessionHandle> StartSessionAsync(SessionPlan plan, CancellationToken cancellationToken = default)
     {
         if (!plan.IsRunnable) throw new InvalidOperationException("OL_E_PLAN_NOT_RUNNABLE");
+        // A SessionPlan is a public record and can be edited or go stale between
+        // planning and start. The spec is re-planned here so that the executable
+        // fingerprint, content resolution and runnability are current facts.
+        var current = await PlanSessionAsync(plan.Spec, cancellationToken).ConfigureAwait(false);
+        if (!current.IsRunnable) throw new InvalidOperationException("OL_E_PLAN_NOT_RUNNABLE: " + string.Join("; ", current.Diagnostics.Where(x => x.Code.StartsWith("OL_E_", StringComparison.Ordinal)).Select(x => x.Code)));
+        plan = current with { SessionId = plan.SessionId };
         var session = new LiveSession(plan.SessionId); if (!sessions.TryAdd(plan.SessionId, session)) throw new InvalidOperationException("Duplicate session id.");
         try { await StartAsync(session, plan, cancellationToken).ConfigureAwait(false); return new SessionHandle(plan.SessionId); }
         catch { sessions.TryRemove(plan.SessionId, out _); throw; }
@@ -45,8 +60,30 @@ public sealed class OmsiLaunchService : IOmsiLaunch
     public async Task<SessionStatus> WaitForAsync(SessionHandle session, SessionState state, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         var live = Get(session); using var timeoutSource = new CancellationTokenSource(timeout); using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
-        while (live.State != state && live.State != SessionState.Failed && live.State != SessionState.Completed) await Task.Delay(100, linked.Token).ConfigureAwait(false);
+        try
+        {
+            while (live.State != state && live.State != SessionState.Failed && live.State != SessionState.Completed) await Task.Delay(100, linked.Token).ConfigureAwait(false);
+        }
+        // A timeout is an answer, not a fault: the caller receives the status
+        // it can act on. Caller cancellation still propagates.
+        catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested) { }
         return live.Status();
+    }
+    public async Task<RecoveryStatus> RecoverPendingAsync(InstallationSpec installation, bool restore, CancellationToken cancellationToken = default)
+    {
+        var root = Path.GetFullPath(installation.RootPath);
+        InstallationLease lease;
+        try { lease = InstallationLease.Acquire(root); }
+        catch (InvalidOperationException) { throw new InvalidOperationException("OL_E_INSTALLATION_BUSY: another OmsiLaunch owner holds this installation."); }
+        using (lease)
+        {
+            var transaction = new FileConfigurationTransaction(root, new Dictionary<string, byte[]>());
+            var pending = await transaction.HasPendingRecoveryAsync(cancellationToken).ConfigureAwait(false);
+            if (!pending || !restore) return new RecoveryStatus(pending, false, Array.Empty<LaunchDiagnostic>());
+            await transaction.RestorePendingAsync(cancellationToken).ConfigureAwait(false);
+            var recovered = !await transaction.HasPendingRecoveryAsync(cancellationToken).ConfigureAwait(false);
+            return new RecoveryStatus(true, recovered, transaction.RestoreNotes.Select(ToDiagnostic).ToArray());
+        }
     }
     public Task StopAsync(SessionHandle session, CancellationToken cancellationToken = default) { Get(session).RequestStop(); return Task.CompletedTask; }
     public async Task CloseAsync(SessionHandle session, CancellationToken cancellationToken = default)
@@ -59,13 +96,32 @@ public sealed class OmsiLaunchService : IOmsiLaunch
         if (live.LifecycleTask is { } lifecycle) await lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
         sessions.TryRemove(session.SessionId, out _);
     }
-    public Task<RuntimeCommandResult> ExecuteRuntimeAsync(SessionHandle session, RuntimeCommand command, TimeSpan timeout, CancellationToken cancellationToken = default)
+    public async Task<RuntimeCommandResult> ExecuteRuntimeAsync(SessionHandle session, RuntimeCommand command, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
+        // This is the public boundary. Internal research primitives and unknown
+        // operations are rejected here, before any frontend, session lookup or
+        // the mailbox is involved.
+        var validation = PublicCapabilityRegistry.ValidateRuntimeArguments(command.Operation, command.Arguments);
+        if (!validation.Accepted) return new RuntimeCommandResult(session.SessionId, command.RequestId, false, validation.ErrorCode);
         var live = Get(session);
         if (command.SessionId != session.SessionId) throw new InvalidOperationException("OL_E_RUNTIME_SESSION_MISMATCH");
         if (live.State != SessionState.Running) throw new InvalidOperationException("OL_E_SESSION_NOT_RUNNING");
-        return live.RequestRuntimeAsync(command, timeout, cancellationToken);
+        var result = await live.RequestRuntimeAsync(command, timeout, cancellationToken).ConfigureAwait(false);
+        return ScrubInternalValues(result);
     }
+    // Defence in depth: whatever the bridge produced, native layout never
+    // leaves the API. Keys following the internal naming convention are dropped.
+    private static RuntimeCommandResult ScrubInternalValues(RuntimeCommandResult result)
+    {
+        if (result.Values is null || !result.Values.Keys.Any(PublicCapabilityRegistry.IsInternalResultKey)) return result;
+        return result with { Values = result.Values.Where(pair => !PublicCapabilityRegistry.IsInternalResultKey(pair.Key)).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal) };
+    }
+    private RuntimeArtifactSet LoadArtifacts()
+    {
+        var expected = runtimePaths.ReleaseManifestPath is { } manifest ? ReleaseManifest.TryReadPluginHashes(manifest) : null;
+        return RuntimeArtifactSet.Load(runtimePaths.PluginBuildDirectory, runtimePaths.NativeBridgePath, expected);
+    }
+    private static LaunchDiagnostic ToDiagnostic(RestoreNote note) => new(note.Code, note.RelativePath, note.Sha256 is null ? null : new Dictionary<string, string> { ["sha256"] = note.Sha256 });
     public Task<IReadOnlyList<Capability>> GetCapabilitiesAsync(InstallationSpec installation, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -87,7 +143,7 @@ public sealed class OmsiLaunchService : IOmsiLaunch
             new Capability("runtime.d3d.texture.release", true, "RUNTIME_VALIDATED", "Explicit release and deterministic repeated-release rejection passed."),
             new Capability("runtime.d3d.lifecycle.reset", true, "IMPLEMENTED_NOT_RUNTIME_VALIDATED", "IDirect3DDevice9::Reset is intercepted to invalidate default-pool resources before Reset; a safe real loss/reset transition has not yet been induced."),
             new Capability("runtime.road-vehicles.read", true, "RUNTIME_VALIDATED"),
-            new Capability("internal.road-vehicles.make-basic", true, "RUNTIME_VALIDATED", "Internal-only profiled primitive: exact one-object RoadVehicles delta, profiled VMT validation, and normal session cleanup passed. It is not PlayerVehicle creation."),
+            new Capability("runtime.road-vehicles.spawn", true, "RUNTIME_VALIDATED", "Public semantic projection of the proven MakeVehicle primitive: canonical model identity, exactly one collection-delta object, opaque handle, and no PlayerVehicle assignment."),
             new Capability("runtime.road-vehicles.place-random", true, "RUNTIME_VALIDATED", "Profiled PlaceRandomBus call increased the road-vehicle collection from 2 to 4 and completed normal cleanup."),
             new Capability("runtime.vehicle.variable.write", true, "RUNTIME_VALIDATED", "Profiled named public-variable write and immediate read-back passed with Refresh_Strings 0 -> 1 -> 0."),
             new Capability("runtime.humans.read", true, "RUNTIME_VALIDATED"),
@@ -95,7 +151,7 @@ public sealed class OmsiLaunchService : IOmsiLaunch
             new Capability("runtime.timetable.track-entries.read", true, "RUNTIME_VALIDATED", "Bounded profile-scoped TrackEntry snapshots returned 91 records on the canonical Grundorf session."),
             new Capability("runtime.time.write", true, "RUNTIME_VALIDATED", "Validated clock scalar write, profiled SetTime and read-back."),
             new Capability("runtime.time.actual-date-time.write", false, "RELEASE_IF_CLOSED", "SetActualDateTime ABI and calendar semantics are not yet closed."),
-            new Capability("runtime.weather.write", true, "RUNTIME_VALIDATED", "Validated profiled scalar whitelist with read-back; ICAO and weather assets remain separate."),
+            new Capability("runtime.weather.write", false, "RUNTIME_PARTIAL", "Direct scalar writes are rejected: OMSI overwrites both profiled wind candidates on the next normal weather tick. A native apply lifecycle is required."),
             new Capability("world.new-map", true, "RUNTIME_VALIDATED"),
             new Capability("world.presented-entrypoint", true, "RUNTIME_VALIDATED"),
             new Capability("world.entrypoint-identity", false, "RUNTIME_PARTIAL", "The native presented-list matcher works, but the raw map identity to presented-list correlation is not closed; raw labels can be duplicated."),
@@ -140,22 +196,42 @@ public sealed class OmsiLaunchService : IOmsiLaunch
     {
         var trace = new HostTrace(plan.Spec.Installation.RootPath, plan.SessionId); trace.Write("STARTSESSION_ENTER");
         if (plan.Spec.Behavior.StartupTimeoutSeconds is < 1 or > 600) throw new ArgumentOutOfRangeException(nameof(plan), "Startup timeout must be between 1 and 600 seconds.");
-        InstallationLease? lease = null; FileConfigurationTransaction? transaction = null; CurrentStartupHandoffStore? handoff = null; CurrentTelemetryStore? telemetry = null; CurrentRuntimeCommandStore? runtime = null;
+        InstallationLease? lease = null; FileConfigurationTransaction? transaction = null; CurrentStartupHandoffStore? handoff = null; CurrentTelemetryStore? telemetry = null; CurrentRuntimeCommandStore? runtime = null; LaunchedProcess? process = null; var processExited = false;
         try
         {
-            trace.Write("PLAN_ACCEPTED"); session.Move(SessionState.AcquiringInstallationLock); lease = InstallationLease.Acquire(plan.Spec.Installation.RootPath); trace.Write("INSTALLATION_LEASE_ACQUIRED");
+            var root = plan.Spec.Installation.RootPath;
+            trace.Write("PLAN_ACCEPTED"); session.Move(SessionState.AcquiringInstallationLock); lease = InstallationLease.Acquire(root); trace.Write("INSTALLATION_LEASE_ACQUIRED");
             session.Move(SessionState.RecoveringPreviousTransaction);
-            var artifacts = RuntimeArtifactSet.Load(runtimePaths.PluginBuildDirectory, runtimePaths.NativeBridgePath);
-            if (plan.Spec.EffectivePresentation.Splash == SplashMode.Managed) SessionVisualAssets.EnsureInstallationAssets(plan.Spec.Installation.RootPath);
+            // A stale journal is recovered before anything reads the live
+            // installation: overlays and the splash language must derive from
+            // the original files, not from a previous session's leftovers.
+            var deferredRecovery = false;
+            var earlyRecovery = new FileConfigurationTransaction(root, new Dictionary<string, byte[]>());
+            if (await earlyRecovery.HasPendingRecoveryAsync(cancellationToken).ConfigureAwait(false))
+            {
+                try { await earlyRecovery.RestorePendingAsync(cancellationToken).ConfigureAwait(false); AddRestoreNotes(session, earlyRecovery); trace.Write("PENDING_JOURNAL_RECOVERED"); }
+                catch (IOException exception) when (exception.Message.StartsWith("OL_E_RECOVERY_ABSENT_OWNERSHIP_UNVERIFIED", StringComparison.Ordinal))
+                {
+                    // A pre-fingerprint journal can only be closed with this
+                    // session's planned bytes; retried once overlays exist.
+                    deferredRecovery = true; trace.Write("PENDING_JOURNAL_RECOVERY_DEFERRED", exception.Message);
+                }
+            }
+            var artifacts = LoadArtifacts();
+            if (plan.Spec.EffectivePresentation.Splash == SplashMode.Managed) SessionVisualAssets.EnsureInstallationAssets(root);
             var visualPlan = SessionVisualAssets.Build(plan.Spec);
-            artifacts.ValidateInstalled(plan.Spec.Installation.RootPath); trace.Write("PERMANENT_PLUGIN_INSTALLATION_VALIDATED");
-            transaction = new FileConfigurationTransaction(plan.Spec.Installation.RootPath, BuildTransactionalOverlays(plan.Spec, visualPlan), visualPlan.Deletions, plan.SessionId); trace.Write("TRANSACTION_STARTED");
-            if (await transaction.HasPendingRecoveryAsync(cancellationToken).ConfigureAwait(false)) await transaction.RestorePendingAsync(cancellationToken).ConfigureAwait(false);
-            // A journal is authoritative for normal crash recovery. With no
-            // journal left, remove only exact byte-identical artifacts from the
-            // active product manifest; differing same-name files remain a
-            // user-owned collision and are snapshotted/restored normally.
-            if (plan.Spec.Behavior.SuppressStaleClosecheckWarning) RemoveStaleClosecheck(plan.Spec.Installation.RootPath, session);
+            artifacts.ValidateInstalled(root); trace.Write("PERMANENT_PLUGIN_INSTALLATION_VALIDATED", artifacts.IntegrityReference);
+            var executableSha256 = HashFile(Path.Combine(root, "Omsi.exe"));
+            // closecheck is OMSI's own crash marker. A stale one is removed when
+            // the spec asks for it (a documented permanent removal), and the
+            // marker OMSI writes during this session is a session artifact that
+            // the transaction restores to absence.
+            var deletions = visualPlan.Deletions.ToList();
+            var closecheck = Path.Combine(root, "closecheck");
+            if (File.Exists(closecheck) && plan.Spec.Behavior.SuppressStaleClosecheckWarning) RemoveStaleClosecheck(root, session);
+            if (!File.Exists(closecheck)) deletions.Add("closecheck");
+            transaction = new FileConfigurationTransaction(root, BuildTransactionalOverlays(plan.Spec, visualPlan), deletions, plan.SessionId); trace.Write("TRANSACTION_STARTED");
+            if (deferredRecovery) { await transaction.RestorePendingAsync(cancellationToken).ConfigureAwait(false); AddRestoreNotes(session, transaction); trace.Write("PENDING_JOURNAL_RECOVERED"); }
             session.Move(SessionState.Snapshotting); session.Move(SessionState.ApplyingConfiguration); await transaction.ApplyAsync(cancellationToken).ConfigureAwait(false);
             session.Move(SessionState.DeployingRuntime); await transaction.MarkStateAsync(TransactionState.RuntimeDeployed, cancellationToken).ConfigureAwait(false); trace.Write("PERMANENT_RUNTIME_READY");
             handoff = CurrentStartupHandoffStore.Create(new StartupHandoff(plan.SessionId, plan.BuildProfileId, plan.Spec.World.Mode, plan.Spec.World.MapIdentity.Value ?? string.Empty, plan.Spec.World.PresentedEntrypointIndex.IsSet ? plan.Spec.World.PresentedEntrypointIndex.Value : -1, true, plan.Spec.PlayerVehicle.IsSet, plan.Spec.Date.Mode, plan.Spec.Time.Mode, plan.Spec.World.EntrypointIdentity.IsSet ? plan.Spec.World.EntrypointIdentity.Value! : string.Empty, plan.Spec.World.SituationIdentity.IsSet ? plan.Spec.World.SituationIdentity.Value! : string.Empty));
@@ -164,7 +240,7 @@ public sealed class OmsiLaunchService : IOmsiLaunch
             session.Move(SessionState.CreatingStartupHandoff); await transaction.MarkStateAsync(TransactionState.HandoffCreated, cancellationToken).ConfigureAwait(false); trace.Write("HANDOFF_CREATED");
             var environment = new Dictionary<string, string> { ["OMSILAUNCH_SESSION_ID"] = plan.SessionId.ToString("D"), ["OMSILAUNCH_HANDOFF_NAME"] = handoff.Name, ["OMSILAUNCH_TELEMETRY_NAME"] = telemetry.Name, ["OMSILAUNCH_RUNTIME_CHANNEL"] = runtime.Name, ["OMSILAUNCH_INTERNET_TEXTURES_MODE"] = plan.Spec.EffectiveInternetTextures.Mode.ToString() };
             session.Move(SessionState.StartingProcess); trace.Write("PROCESS_CREATE_ENTER");
-            var process = await platform.StartAsync(new StartupProcessRequest(Path.Combine(plan.Spec.Installation.RootPath, "Omsi.exe"), plan.Spec.Installation.RootPath, environment), plan.BuildProfileId, cancellationToken).ConfigureAwait(false);
+            process = await platform.StartAsync(new StartupProcessRequest(Path.Combine(root, "Omsi.exe"), root, environment), executableSha256, cancellationToken).ConfigureAwait(false);
             trace.Write("PROCESS_CREATE_RETURN", process.ProcessId.ToString()); session.Attach(process); trace.Write("PROCESS_OWNERSHIP_REGISTERED"); await transaction.RecordProcessAsync(process.Identity.ProcessId, process.Identity.CreationTimeUtc, process.Identity.ExecutablePath, cancellationToken).ConfigureAwait(false); trace.Write("JOURNAL_PROCESS_STARTED"); session.Move(SessionState.WaitingForPlugin);
             session.AttachRuntime(runtime); runtime = null;
             session.LifecycleTask = Task.Run(() => SuperviseAsync(session, plan, process, lease, transaction, handoff, telemetry, trace)); trace.Write("SUPERVISOR_RUN_TASK_STARTED");
@@ -172,27 +248,69 @@ public sealed class OmsiLaunchService : IOmsiLaunch
         catch (Exception exception)
         {
             trace.Write("STARTSESSION_CALL_EXCEPTION", exception.ToString());
+            session.Fail("OL_E_START_SESSION", exception.Message);
+            if (process is not null)
+            {
+                try
+                {
+                    if (!platform.HasExited(process)) platform.Terminate(process);
+                    await platform.WaitForExitAsync(process, CancellationToken.None).ConfigureAwait(false);
+                    processExited = true;
+                    if (transaction is not null) await transaction.MarkStateAsync(TransactionState.ProcessExited, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception cleanupException)
+                {
+                    trace.Write("STARTSESSION_PROCESS_CLEANUP_FAILED", cleanupException.ToString());
+                    session.AddDiagnostic("OL_E_PROCESS_CLEANUP_FAILED", cleanupException.Message);
+                }
+                finally { process.Dispose(); }
+            }
             runtime?.Dispose(); telemetry?.Dispose(); handoff?.Dispose();
-            if (transaction is not null) { try { await transaction.RestoreAsync(CancellationToken.None).ConfigureAwait(false); } catch { } }
-            lease?.Dispose(); throw;
+            if (transaction is not null && await transaction.HasPendingRecoveryAsync(CancellationToken.None).ConfigureAwait(false))
+            {
+                if (process is not null && !processExited)
+                {
+                    // Replacing installation files while a launched OMSI may
+                    // still be using them is unsafe. The prepared journal is
+                    // deliberately retained for the next recovery attempt.
+                    trace.Write("STARTSESSION_RESTORE_DEFERRED_PROCESS_ALIVE");
+                    session.Fail("OL_E_RESTORE_DEFERRED", "OMSI process exit was not confirmed; recovery remains pending.");
+                }
+                else try
+                {
+                    session.Move(SessionState.Restoring);
+                    await transaction.RestoreAsync(CancellationToken.None).ConfigureAwait(false);
+                    AddRestoreNotes(session, transaction);
+                    session.Move(SessionState.CleaningRuntime);
+                }
+                catch (Exception restoreException)
+                {
+                    // RestoreAsync leaves the journal in place until every owned
+                    // original has been restored and verified.
+                    trace.Write("STARTSESSION_RESTORE_FAILED", restoreException.ToString());
+                    session.Fail("OL_E_RESTORE_FAILED", restoreException.Message);
+                }
+            }
+            lease?.Dispose();
         }
     }
 
     private async Task SuperviseAsync(LiveSession session, SessionPlan plan, LaunchedProcess process, InstallationLease lease, FileConfigurationTransaction transaction, CurrentStartupHandoffStore handoff, CurrentTelemetryStore telemetry, HostTrace trace)
     {
+        var processExited = false;
         try
         {
             trace.Write("SUPERVISOR_ENTER");
             var deadline = DateTimeOffset.UtcNow.AddSeconds(plan.Spec.Behavior.StartupTimeoutSeconds);
-            string? lastTelemetry = null;
+            var lastSequence = 0;
             while (!platform.HasExited(process) && !session.StopRequested)
             {
-                var value = telemetry.ReadLatest();
-                if (!string.IsNullOrWhiteSpace(value) && !string.Equals(value, lastTelemetry, StringComparison.Ordinal))
+                var sample = telemetry.ReadLatest();
+                if (sample is { } value && value.Sequence != lastSequence && !string.IsNullOrWhiteSpace(value.Payload))
                 {
-                    lastTelemetry = value;
-                    trace.Write("TELEMETRY_RECEIVED", value);
-                    ApplyTelemetry(session, value);
+                    lastSequence = value.Sequence;
+                    trace.Write("TELEMETRY_RECEIVED", value.Payload);
+                    ApplyTelemetry(session, value.Payload);
                 }
                 if (session.State == SessionState.Failed) break;
                 if (session.State != SessionState.Running && DateTimeOffset.UtcNow >= deadline)
@@ -204,13 +322,36 @@ public sealed class OmsiLaunchService : IOmsiLaunch
             }
             if (platform.HasExited(process) && session.State != SessionState.Running && session.State != SessionState.Failed) session.Fail("OL_E_PROCESS_EXITED_EARLY", "OMSI exited before gameplay was entered.");
             if (!platform.HasExited(process)) platform.Terminate(process);
-            await platform.WaitForExitAsync(process, CancellationToken.None).ConfigureAwait(false); await transaction.MarkStateAsync(TransactionState.ProcessExited).ConfigureAwait(false); session.Move(SessionState.ProcessExited);
+            await platform.WaitForExitAsync(process, CancellationToken.None).ConfigureAwait(false); processExited = true; await transaction.MarkStateAsync(TransactionState.ProcessExited).ConfigureAwait(false); session.Move(SessionState.ProcessExited);
         }
-        catch (Exception exception) { trace.Write("SUPERVISOR_FAULT", exception.ToString()); session.Fail("OL_E_PROCESS_SUPERVISION", exception.Message); }
+        catch (Exception exception)
+        {
+            trace.Write("SUPERVISOR_FAULT", exception.ToString()); session.Fail("OL_E_PROCESS_SUPERVISION", exception.Message);
+            try
+            {
+                if (!platform.HasExited(process)) platform.Terminate(process);
+                await platform.WaitForExitAsync(process, CancellationToken.None).ConfigureAwait(false);
+                processExited = true;
+                await transaction.MarkStateAsync(TransactionState.ProcessExited, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception cleanupException)
+            {
+                trace.Write("SUPERVISOR_PROCESS_CLEANUP_FAILED", cleanupException.ToString());
+                session.AddDiagnostic("OL_E_PROCESS_CLEANUP_FAILED", cleanupException.Message);
+            }
+        }
         finally
         {
-            try { session.Move(SessionState.Restoring); await transaction.RestoreAsync().ConfigureAwait(false); session.Move(SessionState.CleaningRuntime); }
-            catch (Exception exception) { session.Fail("OL_E_RESTORE_FAILED", exception.Message); }
+            try
+            {
+                if (!processExited)
+                {
+                    trace.Write("SUPERVISOR_RESTORE_DEFERRED_PROCESS_ALIVE");
+                    session.Fail("OL_E_RESTORE_DEFERRED", "OMSI process exit was not confirmed; recovery remains pending.");
+                }
+                else { session.Move(SessionState.Restoring); await transaction.RestoreAsync(CancellationToken.None).ConfigureAwait(false); AddRestoreNotes(session, transaction); session.Move(SessionState.CleaningRuntime); }
+            }
+            catch (Exception exception) { trace.Write("SUPERVISOR_RESTORE_FAILED", exception.ToString()); session.Fail("OL_E_RESTORE_FAILED", exception.Message); }
             finally { trace.Write("PROCESS_HANDLE_DISPOSE"); process.Dispose(); handoff.Dispose(); telemetry.Dispose(); session.DisposeRuntime(); lease.Dispose(); if (session.State != SessionState.Failed) session.Move(SessionState.Completed); trace.Write("SUPERVISOR_COMPLETE", session.State.ToString()); }
         }
     }
@@ -266,6 +407,8 @@ public sealed class OmsiLaunchService : IOmsiLaunch
         return overlays;
     }
     private LiveSession Get(SessionHandle handle) => sessions.TryGetValue(handle.SessionId, out var value) ? value : throw new KeyNotFoundException("Unknown OmsiLaunch session.");
+    private static void AddRestoreNotes(LiveSession session, FileConfigurationTransaction transaction) { foreach (var note in transaction.RestoreNotes) session.AddDiagnostic(ToDiagnostic(note)); }
+    private static string HashFile(string path) { using var stream = File.OpenRead(path); using var algorithm = System.Security.Cryptography.SHA256.Create(); return Convert.ToHexString(algorithm.ComputeHash(stream)); }
     private static void RemoveStaleClosecheck(string root, LiveSession session)
     {
         var path = Path.Combine(root, "closecheck");
@@ -283,6 +426,7 @@ public sealed class OmsiLaunchService : IOmsiLaunch
         public LiveSession(Guid id) => Id = id;
         public void Attach(LaunchedProcess process) { lock (gate) diagnostics.Add(new("process.started", process.ProcessId.ToString(), new Dictionary<string, string> { ["thread_id"] = process.ThreadId.ToString(), ["creation_utc"] = process.Identity.CreationTimeUtc.ToString("O") })); }
         public void AddDiagnostic(string code, string message) { lock (gate) diagnostics.Add(new(code, message)); }
+        public void AddDiagnostic(LaunchDiagnostic diagnostic) { lock (gate) diagnostics.Add(diagnostic); }
         public void AddRuntimeEvent(string type, IReadOnlyDictionary<string, string> data) { lock (gate) { runtimeEvents.Add(new(type, DateTimeOffset.UtcNow, ++eventSequence, data)); if (runtimeEvents.Count > 256) runtimeEvents.RemoveAt(0); } }
         public void Move(SessionState state) { lock (gate) { if (State != SessionState.Failed && State != SessionState.Completed) { State = state; if (state == SessionState.PluginBootstrap) PluginStarted = true; } } }
         public void Fail(string code, string message) { lock (gate) { diagnostics.Add(new(code, message)); State = SessionState.Failed; } }

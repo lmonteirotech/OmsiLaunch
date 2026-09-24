@@ -25,5 +25,17 @@
     <MakeDir Directories="$(IntDir)" />
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\..\tools\Write-NativeIdentityHeader.ps1&quot; -IdentityFile &quot;$(MSBuildThisFileDirectory)..\..\OmsiLaunch.Version.props&quot; -OutputPath &quot;$(IntDir)OmsiLaunch.Identity.h&quot;" />
   </Target>
+  <!-- Build receipt: binds the produced DLL (SHA-256) to the exact content of
+       the sources it was built from. Packaging verifies both hashes, so a stale
+       or foreign OmsiLaunch.Native.x86.dll cannot be packaged, independent of
+       file timestamps. -->
+  <Target Name="WriteOmsiLaunchNativeBuildReceipt" AfterTargets="Build">
+    <ItemGroup>
+      <_OmsiLaunchReceiptSource Include="@(ClCompile->'%(FullPath)');@(ResourceCompile->'%(FullPath)');$(MSBuildProjectFullPath);$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\OmsiLaunch.Version.props'))" />
+    </ItemGroup>
+    <GetFileHash Files="@(_OmsiLaunchReceiptSource)" Algorithm="SHA256"><Output TaskParameter="Items" ItemName="_OmsiLaunchReceiptSourceHash" /></GetFileHash>
+    <GetFileHash Files="$(TargetPath)" Algorithm="SHA256"><Output TaskParameter="Hash" PropertyName="_OmsiLaunchReceiptOutputHash" /></GetFileHash>
+    <WriteLinesToFile File="$(OutDir)OmsiLaunch.Native.x86.build-receipt.txt" Lines="output=$(_OmsiLaunchReceiptOutputHash);@(_OmsiLaunchReceiptSourceHash->'source=%(FileHash)|%(FullPath)')" Overwrite="true" />
+  </Target>
   <ImportGroup Label="ExtensionTargets" />
 </Project>

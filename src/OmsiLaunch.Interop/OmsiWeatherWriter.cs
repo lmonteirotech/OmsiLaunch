@@ -34,8 +34,11 @@ public sealed class OmsiWeatherWriter
                 case "secondary_light_factor": await WriteFloatAsync(address, "SecondaryLightFactor", pair.Value, 0, 1, cancellationToken).ConfigureAwait(false); break;
                 case "ambient_light_factor": await WriteFloatAsync(address, "AmbientLightFactor", pair.Value, 0, 1, cancellationToken).ConfigureAwait(false); break;
                 case "cloud_transparency": await WriteFloatAsync(address, "CloudTransparency", pair.Value, 0, 1, cancellationToken).ConfigureAwait(false); break;
-                case "wind_speed": await WriteFloatAsync(address, "WindSpeed", pair.Value, 0, 200, cancellationToken).ConfigureAwait(false); break;
-                case "wind_direction": await WriteFloatAsync(address, "WindDirection", pair.Value, 0, 360, cancellationToken).ConfigureAwait(false); break;
+                // ActualWind* is a derived per-frame projection. Persist the
+                // requested weather through ActWeather, which OMSI consumes on
+                // its normal weather update rather than fighting it every tick.
+                case "wind_speed": await WriteFloatAsync(address, "ActiveWindSpeed", pair.Value, 0, 200, cancellationToken).ConfigureAwait(false); break;
+                case "wind_direction": await WriteFloatAsync(address, "ActiveWindDirection", pair.Value, 0, 360, cancellationToken).ConfigureAwait(false); break;
                 case "relative_humidity": await WriteFloatAsync(address, "RelativeHumidity", pair.Value, 0, 1, cancellationToken).ConfigureAwait(false); break;
                 case "absolute_humidity": await WriteFloatAsync(address, "AbsoluteHumidity", pair.Value, 0, 100, cancellationToken).ConfigureAwait(false); break;
                 case "precipitation_set": await memory.WriteValueAsync(address + layout["PrecipitationSet"], ParseBoolean(pair.Value), cancellationToken).ConfigureAwait(false); break;

@@ -50,7 +50,9 @@ internal static class SessionVisualAssets
             var profile = Path.GetFullPath(internet.OverrideProfilePath.Value!);
             if (!File.Exists(profile)) throw new FileNotFoundException("OL_E_ITX_PROFILE_MISSING", profile);
             var bytes = File.ReadAllBytes(profile);
-            foreach (var target in ParseItxTargets(bytes)) { ValidateTextureTarget(spec.Installation.RootPath, target); deletions.Add(target); }
+            // Targets are recorded in their canonical spelling so that two
+            // spellings of one file can never become two transaction entries.
+            foreach (var target in ParseItxTargets(bytes)) { var canonical = ValidateTextureTarget(spec.Installation.RootPath, target); if (!deletions.Contains(canonical, StringComparer.OrdinalIgnoreCase)) deletions.Add(canonical); }
             deletions.Add("Texture\\standard.ipr");
             files["Texture\\standard.itx"] = bytes;
         }
@@ -100,10 +102,17 @@ internal static class SessionVisualAssets
         if (lines.Length == 0 || lines.Length % 2 != 0) throw new InvalidDataException("OL_E_ITX_PROFILE_INVALID");
         for (var i = 0; i < lines.Length; i += 2) { if (!Uri.TryCreate(lines[i], UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)) throw new InvalidDataException("OL_E_ITX_PROFILE_INVALID"); yield return lines[i + 1]; }
     }
-    private static void ValidateTextureTarget(string root, string target)
+    // canonical root -> canonical target -> relative path -> segment rules.
+    // Only a directory segment named exactly "texture" (Windows casing rules)
+    // below the installation root satisfies the rule; "texture" elsewhere in the
+    // absolute root, or names such as "mytexture"/"texture2", never do.
+    internal static string ValidateTextureTarget(string root, string target)
     {
-        if (Path.IsPathRooted(target) || target.Contains("..", StringComparison.Ordinal) || target.StartsWith("\\", StringComparison.Ordinal)) throw new InvalidDataException("OL_E_ITX_TARGET_OUTSIDE_TEXTURE_PATH");
-        var full = Path.GetFullPath(Path.Combine(root, target)); var basePath = Path.GetFullPath(root) + Path.DirectorySeparatorChar;
-        if (!full.StartsWith(basePath, StringComparison.OrdinalIgnoreCase) || !full.Contains("\\texture\\", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("OL_E_ITX_TARGET_OUTSIDE_TEXTURE_PATH");
+        if (string.IsNullOrWhiteSpace(target) || Path.IsPathRooted(target) || target.StartsWith("\\", StringComparison.Ordinal) || target.StartsWith("/", StringComparison.Ordinal) || InstallationPaths.Segments(target).Any(segment => segment == "..")) throw new InvalidDataException("OL_E_ITX_TARGET_OUTSIDE_TEXTURE_PATH");
+        if (!InstallationPaths.TryGetContainedRelativePath(root, target, out var relative)) throw new InvalidDataException("OL_E_ITX_TARGET_OUTSIDE_TEXTURE_PATH");
+        var directories = InstallationPaths.Segments(relative).SkipLast(1);
+        if (!directories.Any(segment => string.Equals(segment, "texture", StringComparison.OrdinalIgnoreCase))) throw new InvalidDataException("OL_E_ITX_TARGET_OUTSIDE_TEXTURE_PATH");
+        if (PathConfinement.ContainsReparsePoint(root, Path.Combine(InstallationPaths.NormalizeRoot(root), relative))) throw new InvalidDataException("OL_E_ITX_TARGET_OUTSIDE_TEXTURE_PATH");
+        return relative;
     }
 }

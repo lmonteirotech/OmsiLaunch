@@ -67,12 +67,17 @@ public sealed record EnvironmentSpec(
     IReadOnlyDictionary<string, OptionalValue<string>> Controllers);
 public sealed record InputSpec(OptionalValue<string> KeyboardDocument, OptionalValue<string> ControllerDocument);
 public sealed record DiagnosticsSpec(bool Log = true, bool Verbose = false, bool OmsiLogAll = false, bool ProcessTrace = false, bool PluginTrace = false, bool NativeTrace = false);
-public sealed record SessionPresentationSpec(SplashMode Splash = SplashMode.Managed, OptionalValue<string> Language = default, OptionalValue<string> CustomAssetDirectory = default);
+// Presentation is intentionally independent from session ownership. Integrators
+// that render their own session affordance can suppress only the standalone tray.
+public sealed record SessionPresentationSpec(SplashMode Splash = SplashMode.Managed, OptionalValue<string> Language = default, OptionalValue<string> CustomAssetDirectory = default, bool SuppressTrayIcon = false);
 public sealed record InternetTexturesSpec(InternetTexturesMode Mode = InternetTexturesMode.Native, OptionalValue<string> OverrideProfilePath = default);
+// Identifies declarative third-party session content without leaking its YAML
+// representation into the rest of the public session API.
+public sealed record SessionProfileMetadata(string Id, string Name, string Version, string Author, string PresetId, int PresetIndex, string PresetName, string PackagePath);
 // Large maps and native saved situations can legitimately require more than one minute
 // before they reach gameplay. Callers may still choose a tighter bounded timeout.
 public sealed record LaunchBehaviorSpec(bool RestoreConfiguration = true, bool SuppressStaleClosecheckWarning = true, int StartupTimeoutSeconds = 180, int ShutdownTimeoutSeconds = 30);
-public sealed record LaunchSpec(InstallationSpec Installation, WorldSpec World, DateSpec Date, TimeSpec Time, OptionalValue<PlayerVehicleSpec> PlayerVehicle, EnvironmentSpec Environment, LaunchBehaviorSpec Behavior, YearSpec? Year = null, WeatherSpec? Weather = null, InputSpec? Input = null, DiagnosticsSpec? Diagnostics = null, SessionPresentationSpec? Presentation = null, InternetTexturesSpec? InternetTextures = null)
+public sealed record LaunchSpec(InstallationSpec Installation, WorldSpec World, DateSpec Date, TimeSpec Time, OptionalValue<PlayerVehicleSpec> PlayerVehicle, EnvironmentSpec Environment, LaunchBehaviorSpec Behavior, YearSpec? Year = null, WeatherSpec? Weather = null, InputSpec? Input = null, DiagnosticsSpec? Diagnostics = null, SessionPresentationSpec? Presentation = null, InternetTexturesSpec? InternetTextures = null, SessionProfileMetadata? SessionProfile = null)
 {
     public YearSpec EffectiveYear => Year ?? new(DateTimeMode.Unset, OptionalValue<int>.Unset);
     public WeatherSpec EffectiveWeather => Weather ?? new(WeatherMode.Unset, OptionalValue<string>.Unset, OptionalValue<string>.Unset);
@@ -90,6 +95,9 @@ public sealed record PlannedMutation(string RelativePath, string SemanticKey, st
 public sealed record SessionPlan(Guid SessionId, string BuildProfileId, LaunchSpec Spec, RuntimePlatformInfo Platform, IReadOnlyList<ContentIdentity> ResolvedContent, IReadOnlyList<string> TouchedFiles, IReadOnlyList<string> RuntimeArtifacts, IReadOnlyList<Capability> RequiredCapabilities, IReadOnlyList<Capability> UnsupportedRequestedFeatures, IReadOnlyList<PlannedMutation> PlannedMutations, IReadOnlyList<LaunchDiagnostic> Diagnostics, bool IsRunnable);
 public sealed record SessionStatus(Guid SessionId, SessionState State, IReadOnlyList<LaunchDiagnostic> Diagnostics, IReadOnlyList<RuntimeEvent>? RuntimeEvents = null);
 public sealed record SessionHandle(Guid SessionId);
+// Result of an explicit recovery request. Pending means a durable journal
+// exists; Recovered means it was restored, verified and removed by this call.
+public sealed record RecoveryStatus(bool Pending, bool Recovered, IReadOnlyList<LaunchDiagnostic> Diagnostics);
 public sealed record ContentIdentity(string Identity, string Kind, string? DisplayName = null);
 public enum ContentQueryKind : byte { Maps, Situations, Vehicles, Repaints, Hofs, FleetNumbers, Registrations, Addons, Entrypoints }
 
@@ -104,4 +112,7 @@ public interface IOmsiLaunch
     Task<RuntimeCommandResult> ExecuteRuntimeAsync(SessionHandle session, RuntimeCommand command, TimeSpan timeout, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Capability>> GetCapabilitiesAsync(InstallationSpec installation, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ContentIdentity>> DiscoverAsync(InstallationSpec installation, ContentQueryKind query, OptionalValue<string> scope = default, CancellationToken cancellationToken = default);
+    // Recovery of a stale durable journal. It takes the installation lease, so
+    // it never restores files underneath a session that is still starting.
+    Task<RecoveryStatus> RecoverPendingAsync(InstallationSpec installation, bool restore, CancellationToken cancellationToken = default);
 }

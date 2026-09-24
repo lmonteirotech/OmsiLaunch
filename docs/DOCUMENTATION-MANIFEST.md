@@ -1,36 +1,60 @@
-# Beta 0.1 Documentation Manifest
+# Documentation Manifest
 
-This manifest is the source map for the Beta 0.1 documentation phase. It does not create a promise that every listed page already exists.
+Source map for the OmsiLaunch `0.1.0-beta3` documentation. Every page listed as
+`WRITTEN_THIS_ROUND` exists under `docs/`, is normative, English only, and is
+checked by `tests/OmsiLaunch.DocumentationTests`. No page is promised that does
+not exist.
+
+## Normative pages
 
 | Document | Purpose | Audience | Source of truth | Status |
 |---|---|---|---|---|
-| `README.md` | Product scope and supported build summary | All users | Root README, `IMPLEMENTATION-STATUS.md` | READY_TO_WRITE |
-| `getting-started/installation.md` | Prerequisites, staging, and clean removal | Users | `RuntimeDeployment.cs`, transaction tests | READY_TO_WRITE |
-| `getting-started/first-session.md` | Canonical Start/Running/Stop flow | Developers | `LaunchApi.cs`, CLI, runtime validation artifacts | READY_TO_WRITE |
-| `getting-started/compatibility.md` | Exact-build policy | Users | `Profile.cs`, `BUILD-PROFILES.md` | READY_TO_WRITE |
-| `concepts/architecture.md` | Host, plugin, Native.x86, profile boundaries | Developers | `PUBLIC-API.md`, architecture sources | READY_TO_WRITE |
-| `concepts/omsilaunch-directory.md` | Installation-state directory, splash assets, lifecycle, and recovery | Users, developers | `SessionVisualAssets.cs`, transaction sources, Release validation | READY |
-| `concepts/sessions.md` | Lifecycle, transaction, lease, recovery | Developers | `OmsiLaunchService.cs`, `RUNTIME-CONTROL.md` | READY_TO_WRITE |
-| `concepts/build-profiles.md` | Profile and executable validation | Developers | `Profile.cs`, `BUILD-PROFILES.md` | READY_TO_WRITE |
-| `concepts/handles.md` | Session-scoped opaque handles | Developers | `LaunchApi.cs`, D3D and runtime readers | READY_TO_WRITE |
-| `concepts/errors.md` | Beta error taxonomy | Developers | runtime command results, `D3DRuntimeApi.cs` | READY_TO_WRITE |
-| `concepts/semantic-vs-advanced-api.md` | Stable semantic versus profile-gated advanced access | Developers | `OmsiRuntimeSurface.cs`, capability catalog | READY_TO_WRITE |
-| `api/overview.md` | Public API entry points | Developers | `IOmsiLaunch`, `LaunchApi.cs` | READY_TO_WRITE |
-| `api/session.md` | Start, wait, stop, close, status | Developers | `IOmsiLaunch`, `LaunchApi.cs` | READY_TO_WRITE |
-| `api/time.md`, `api/weather.md`, `api/map.md`, `api/camera.md` | Core runtime operations | Developers | `CurrentRuntimeControl.cs`, validation artifacts | READY_TO_WRITE |
-| `api/vehicles.md`, `api/player-vehicle.md`, `api/humans.md`, `api/timetable.md` | Runtime entities and snapshots | Developers | `OmsiRuntimeReaders.cs`, runtime artifacts | READY_TO_WRITE |
-| `api/scripts.md`, `api/hof.md`, `api/drivers.md`, `api/tickets.md` | Profile-gated runtime data | Developers | `CurrentRuntimeControl.cs`, Wave A-C reports | READY_TO_WRITE |
-| `api/d3d.md`, `api/events.md`, `api/advanced.md` | Experimental advanced surfaces | Developers | `D3DRuntimeApi.cs`, Wave D report, runtime telemetry | READY_TO_WRITE |
-| `guides/create-vehicle.md` | PlaceRandomBus and internal basic creation boundaries | Developers | runtime artifacts, MakeVehicle reports | NEEDS_CODE_CLOSURE |
-| `guides/variables-and-triggers.md` | Numeric variables and unsupported string/trigger writes | Developers | Wave A closure report | READY_TO_WRITE |
-| `guides/d3d-textures.md` | Texture lifecycle and reset limits | Developers | `D3DRuntimeApi.cs`, Wave D report | READY_TO_WRITE |
-| `guides/diagnostics.md`, `guides/recovery.md` | Evidence collection and safe recovery | Users, developers | host trace, journal/recovery implementation | READY_TO_WRITE |
-| `reference/beta-0.1-capabilities.md` | Definitive Beta capability catalog | Users, developers | current code and regression artifacts | READY |
-| `localized/<locale>/` | Complete localized public-documentation mirror | Users, developers | Canonical English public documentation | LOCALIZED_PUBLIC_SURFACE |
-| `reference/known-limitations.md` | Explicit Beta boundaries | Users, developers | readiness report and parity reports | READY |
-| `reference/compatibility-matrix.md`, `reference/errors.md` | Build and error references | Developers | profile/capability/error sources | READY_TO_WRITE |
-| `reference/omsihook-parity.md` | Engineering parity tracking | Engineers | `third_party/OMSIHOOK-REUSE-MATRIX.md`, Wave reports | INTERNAL_ONLY |
-| `internals/native-interop.md`, `internals/build-profile-current.md` | Native ABI and Current-profile implementation | Maintainers | Interop/Native sources and research | INTERNAL_ONLY |
-| `internals/transaction-model.md`, `internals/d3d-lifecycle.md` | Recovery and resource lifetime internals | Maintainers | Core/process/native sources and reports | INTERNAL_ONLY |
+| [`README.md`](README.md) | Index, audience split, gate description | All | this manifest, `tests/OmsiLaunch.DocumentationTests/Program.cs` | WRITTEN_THIS_ROUND |
+| [`getting-started/installation.md`](getting-started/installation.md) | Prerequisites, package extraction, verification, removal | Users | `tools/New-ReleasePackage.ps1`, `src/OmsiLaunch.Process/RuntimeDeployment.cs` | WRITTEN_THIS_ROUND |
+| [`getting-started/first-session.md`](getting-started/first-session.md) | Plan, start, observe, stop one session | Users | `tools/OmsiLaunch.Cli/Program.cs`, `src/OmsiLaunch.Core/OmsiLaunchService.cs` | WRITTEN_THIS_ROUND |
+| [`getting-started/api-quick-start.md`](getting-started/api-quick-start.md) | Plan, start, read and stop one session from a .NET program | Integrators | `src/OmsiLaunch.Core/OmsiLaunchService.cs`, `src/OmsiLaunch.Api/LaunchApi.cs`; compiled by `research/reports/documentation-audit/compile-doc-snippets.py` | WRITTEN_THIS_ROUND |
+| [`reference/cli.md`](reference/cli.md) | Flags, command words, hierarchical routes | Users | `CliInput.KnownFlags`, `CliInput.HierarchicalRoutes`, `CliInput.AcceptedNoEffectFlags` | WRITTEN_THIS_ROUND |
+| [`reference/cli-examples.md`](reference/cli-examples.md) | Worked command lines | Users | `tools/OmsiLaunch.Cli/Program.cs` | WRITTEN_THIS_ROUND |
+| [`reference/exit-codes.md`](reference/exit-codes.md) | `PublicExitCode` and bootstrapper shim codes | Users, integrators | `src/OmsiLaunch.Api/PublicControlContract.cs`, `tools/OmsiLaunch.Bootstrapper/*.cpp` | WRITTEN_THIS_ROUND |
+| [`reference/local-control.md`](reference/local-control.md) | Named-pipe protocol `0.1`, binding, trust model | Integrators | `tools/OmsiLaunch.Cli/LocalControlPlane.cs` | WRITTEN_THIS_ROUND |
+| [`reference/omsilaunchw.md`](reference/omsilaunchw.md) | `OmsiLaunchW.exe`: difference from `OmsiLaunch.exe`, `/silent` delegation, dialogs, exit codes, quick start | Users, integrators | `tools/OmsiLaunch.Bootstrapper/OmsiLaunch.WindowsHost.cpp`, `tools/OmsiLaunch.Cli/WindowsHost.cs`, `tools/OmsiLaunch.Cli/Program.cs` | WRITTEN_THIS_ROUND |
+| [`reference/windows-tray.md`](reference/windows-tray.md) | Tray indicator, `OmsiLaunchW.exe`, `/silent`, `SuppressTrayIcon` | Users, integrators | `tools/OmsiLaunch.Cli/WindowsHost.cs`, `tools/OmsiLaunch.Bootstrapper/OmsiLaunch.WindowsHost.cpp` | WRITTEN_THIS_ROUND |
+| [`reference/packaging.md`](reference/packaging.md) | Release ZIP contents, `release-manifest.json`, `.omsilaunch\` layout | Users, maintainers | `tools/New-ReleasePackage.ps1`, `src/OmsiLaunch.Core/HostTrace.cs` | WRITTEN_THIS_ROUND |
+| [`reference/public-api.md`](reference/public-api.md) | `IOmsiLaunch`, records, enums, stability | Integrators | `src/OmsiLaunch.Api/*.cs` | WRITTEN_THIS_ROUND |
+| [`reference/public-api-inventory.md`](reference/public-api-inventory.md) | Every public type and member of `OmsiLaunch.Api`, `OmsiLaunch.Core`, `OmsiLaunch.Process` with signature and stability | Integrators | generated by reflection (`tests/OmsiLaunch.DocumentationTests/PublicApiInventory.cs`, `--write-inventory`); the gate fails on any difference | GENERATED |
+| [`reference/launchspec.md`](reference/launchspec.md) | Every `LaunchSpec` property and enum, `/spec` JSON rules | Integrators, users | `src/OmsiLaunch.Api/LaunchApi.cs`, `LaunchSpecJson` | WRITTEN_THIS_ROUND |
+| [`reference/errors.md`](reference/errors.md) | Every `OL_E_*` / `OL_W_*` code | Integrators, users | `src/OmsiLaunch.Api/PublicErrorCodes.cs` | WRITTEN_THIS_ROUND |
+| [`concepts/session-lifecycle.md`](concepts/session-lifecycle.md) | `SessionState` transitions, stop semantics | Integrators | `src/OmsiLaunch.Core/OmsiLaunchService.cs`, `tools/OmsiLaunch.Cli/OwnerSession.cs` | WRITTEN_THIS_ROUND |
+| [`reference/session-profiles.md`](reference/session-profiles.md) | `omsilaunch.session-profile/v1` schema, keys, precedence | Users, map authors | `src/OmsiLaunch.Core/SessionProfiles.cs` | WRITTEN_THIS_ROUND |
+| [`concepts/transactions-and-recovery.md`](concepts/transactions-and-recovery.md) | Journal, backups, restore, deletions, crash recovery | Integrators, maintainers | `src/OmsiLaunch.Configuration/ConfigurationTransaction.cs`, `src/OmsiLaunch.Core/OmsiLaunchService.cs` | WRITTEN_THIS_ROUND |
+| [`concepts/permanent-plugin.md`](concepts/permanent-plugin.md) | `plugins\OmsiLaunch.*` closure and manifest integrity | Maintainers | `src/OmsiLaunch.Process/RuntimeDeployment.cs` | WRITTEN_THIS_ROUND |
+| [`reference/capabilities.md`](reference/capabilities.md) | Capability catalog and public runtime operation ids | Integrators | `src/OmsiLaunch.Api/PublicCapabilityRegistry.cs` | WRITTEN_THIS_ROUND |
+| [`reference/runtime-control.md`](reference/runtime-control.md) | Command channel, timeouts, handles | Integrators | `src/OmsiLaunch.Process/*`, `src/OmsiLaunch.Plugin/*`, `src/OmsiLaunch.Interop/*` | WRITTEN_THIS_ROUND |
+| [`status/runtime-validation-status.md`](status/runtime-validation-status.md) | What ran under OMSI and what still must | All | `research/reports/OMSILAUNCH-RUNTIME-VALIDATION-MATRIX.md` | WRITTEN_THIS_ROUND |
+| [`reference/compatibility.md`](reference/compatibility.md) | Supported `Omsi.exe` hashes and platform | Users | `src/OmsiLaunch.Builds.Omsi23004/Profile.cs` | WRITTEN_THIS_ROUND |
+| [`reference/known-limitations.md`](reference/known-limitations.md) | Unsupported, partial and accepted-risk items | All | code diagnostics, `src/OmsiLaunch.Core/SessionPlanner.cs` | WRITTEN_THIS_ROUND |
 
-The full documentation-writing phase begins only after this manifest and the Beta readiness report are accepted.
+## Legacy pages
+
+These files are kept so that existing links keep resolving. Superseded pages
+contain only a redirect notice and a short summary.
+
+| Document | Status |
+|---|---|
+| [`api/local-control.md`](api/local-control.md) | LEGACY_SUPERSEDED_BY [`reference/local-control.md`](reference/local-control.md) |
+| [`concepts/omsilaunch-directory.md`](concepts/omsilaunch-directory.md) | LEGACY_SUPERSEDED_BY [`reference/packaging.md`](reference/packaging.md) |
+| [`concepts/windows-session-indicator.md`](concepts/windows-session-indicator.md) | LEGACY_SUPERSEDED_BY [`reference/windows-tray.md`](reference/windows-tray.md) |
+| [`guides/session-profiles.md`](guides/session-profiles.md) | LEGACY_SUPERSEDED_BY [`reference/session-profiles.md`](reference/session-profiles.md) |
+| [`reference/beta-0.1-capabilities.md`](reference/beta-0.1-capabilities.md) | LEGACY_SUPERSEDED_BY [`reference/capabilities.md`](reference/capabilities.md) |
+| [`windows-ui-localization.md`](windows-ui-localization.md) | LEGACY_HISTORICAL (Windows UI string glossary; consult `WindowsUiStrings.cs` for current strings) |
+| [`status/release-0.1.0-beta1-notes.md`](status/release-0.1.0-beta1-notes.md) | LEGACY_HISTORICAL |
+| [`status/release-0.1.0-beta2-notes.md`](status/release-0.1.0-beta2-notes.md) | LEGACY_HISTORICAL |
+| [`adr/ADR-0009-Current-Windows-x64-Support.md`](adr/ADR-0009-Current-Windows-x64-Support.md) | LEGACY_HISTORICAL (decision record, still in force) |
+| [`adr/ADR-0010-Legacy-Portability-Boundary.md`](adr/ADR-0010-Legacy-Portability-Boundary.md) | LEGACY_HISTORICAL (decision record, still in force) |
+
+## Non-normative content
+
+| Path | Status |
+|---|---|
+| `localized/<locale>/` (`pt-BR`, `pt-PT`, `en-GB`, `fr-FR`, `de-DE`, `es-ES`, `es-LATAM`, `it-IT`, `pl-PL`, `nl-NL`, `ru-RU`, `zh-CN`, `zh-TW` and `ja-JP`) and [`localized/LOCALIZATION-MANIFEST.md`](localized/LOCALIZATION-MANIFEST.md) | TRANSLATION of the `0.1.0-beta3` English pages; not normative (the English page wins); checked by the `docs.localization` gate |
+| `examples/session-profiles/rmg-leste/profile.yaml` | Example asset referenced by the session-profile reference |
